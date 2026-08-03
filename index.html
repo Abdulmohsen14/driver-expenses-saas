@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="light">
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- مكتبة تحويل التحليلات إلى PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مصاريف السائق</title>
+    
+    <link rel="icon" type="image/png" href="https://img.icons8.com/ios-filled/50/3b82f6/bank-cards.png">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    
+    <!-- الأزرار الرئيسية -->
+    <button id="theme-toggle"><i class="fa-solid fa-moon"></i></button>
+    <button id="lang-toggle">EN</button>
+
+    <div id="login-screen" class="auth-container">
+        <div class="auth-card">
+            <div class="logo"><i class="fa-solid fa-money-check-dollar"></i> مصاريف السائق</div>
+            
+            <div id="login-form-container">
+                <h2>مرحباً بك</h2>
+                <p>سجل دخولك للوصول إلى حسابك</p>
+                <div class="auth-form">
+                    <input type="email" id="login-email" class="form-input" placeholder="البريد الإلكتروني">
+                    <input type="password" id="login-password" class="form-input" placeholder="كلمة المرور">
+                    <button id="email-login-btn" class="btn-primary">دخول</button>
+                </div>
+                <p class="switch-form-text">ليس لديك حساب؟ <span id="show-signup" class="text-link">أنشئ حساباً جديداً</span></p>
+            </div>
+
+            <div id="signup-form-container" class="hidden">
+                <h2>حساب جديد</h2>
+                <p>أدخل بياناتك لإنشاء حسابك الخاص</p>
+                <div class="auth-form">
+                    <input type="text" id="signup-name" class="form-input" placeholder="الاسم الكامل">
+                    <input type="email" id="signup-email" class="form-input" placeholder="البريد الإلكتروني">
+                    <input type="password" id="signup-password" class="form-input" placeholder="كلمة المرور">
+                    <input type="password" id="signup-password-confirm" class="form-input" placeholder="تأكيد كلمة المرور">
+                    <button id="email-signup-btn" class="btn-primary">إنشاء الحساب</button>
+                </div>
+                <p class="switch-form-text">لديك حساب بالفعل؟ <span id="show-login" class="text-link">سجل دخولك</span></p>
+            </div>
+
+            <div class="divider"><span>أو</span></div>
+            <button id="google-login-btn" class="btn-google">
+                <i class="fa-brands fa-google"></i> المتابعة باستخدام Google
+            </button>
+        </div>
+    </div>
+
+    <div id="dashboard-screen" class="layout hidden">
+        <aside class="sidebar">
+            <div class="logo"><i class="fa-solid fa-money-check-dollar"></i> مصاريف السائق</div>
+            <nav class="nav-menu">
+                <button class="nav-item active" data-target="manage"><i class="fa-solid fa-receipt"></i> العمليات</button>
+                <button class="nav-item" data-target="analytics"><i class="fa-solid fa-chart-line"></i> التحليلات</button>
+                <button class="nav-item" data-target="drivers"><i class="fa-solid fa-users"></i> السائقين</button>
+            </nav>
+            <div class="user-profile" style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
+                    <img id="user-avatar" src="https://via.placeholder.com/150" alt="User" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover;">
+                    <div class="user-info" style="overflow: hidden;">
+                        <span id="user-name" style="display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 600;">...</span>
+                        <button id="logout-btn" class="btn-text" style="font-size: 11px; color: var(--danger);">تسجيل خروج</button>
+                    </div>
+                </div>
+                <button id="settings-btn" class="btn-text" style="color: var(--text-muted); font-size: 16px; padding: 5px;" title="إعدادات الحساب">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-header">
+                <h1 id="page-title">إدارة العمليات</h1>
+            </header>
+            
+            <div class="content-area">
+                <!-- هنا سيتم رسم المحتوى برمجياً لتفادي القلتش -->
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/auth.js"></script>
+    <script type="module" src="js/app.js"></script>
+
+</body>
+</html>
