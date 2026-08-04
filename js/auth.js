@@ -1,6 +1,6 @@
 import { auth } from './firebase-config.js';
 import { 
-    GoogleAuthProvider, signInWithRedirect, onAuthStateChanged, signOut, 
+    GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, 
     createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile,
     sendEmailVerification, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -119,7 +119,8 @@ googleBtn.addEventListener('click', async (e) => {
     const isEn = document.documentElement.lang === 'en';
     
     try { 
-        await signInWithRedirect(auth, provider); 
+        // التعديل السحري هنا
+        await signInWithPopup(auth, provider); 
     } catch (error) { 
         showInlineError(googleBtn, originalText, isEn ? 'Authentication Failed ❌' : 'فشل الدخول ❌');
     }
