@@ -258,3 +258,13 @@ bot.action(/^driver_(.+)$/, async (ctx) => {
 
 bot.launch();
 console.log('🤖 Telegram Bot is running with Interactive Driver Selection...');
+// كود وهمي لفتح منفذ عشان منصة Render ما تطفي البوت
+const http = require('http');
+const server = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Bot is running successfully!');
+});
+const port = process.env.PORT || 3000;
+server.listen(port, () => {
+    console.log(`Dummy web server is running on port ${port}...`);
+});
