@@ -7,14 +7,18 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 // 1. إعدادات الاتصال بقاعدة البيانات (مخفية وآمنة 100%)
 // =========================================================================
 // السطر هذا بيسحب المفتاح السري من الملف الخارجي بدون ما يظهر في الكود
-const serviceAccount = require('./serviceAccountKey.json');
+let serviceAccount;
+try {
+    serviceAccount = require('./serviceAccountKey.json');
+} catch (e) {
+    serviceAccount = require('../serviceAccountKey.json');
+}
 
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
 // توكن البوت (يفضل مستقبلاً تحطه في ملف .env أيضاً لمزيد من الأمان)
-const bot = new Telegraf('8927972087:AAGt8Y1x9tKDQUy3koQvA9ICfn2sLEaZ3-M');
-
+const bot = new Telegraf(process.env.BOT_TOKEN);
 // =========================================================================
 // 2. ذاكرة مؤقتة لحفظ العمليات حتى يختار المستخدم السائق
 // =========================================================================
