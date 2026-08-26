@@ -133,3 +133,33 @@ html[dir="rtl"] #lang-toggle { left: 80px; right: auto; }
 /* الوضع الإنجليزي (LTR) - الأزرار يمين */
 html[dir="ltr"] #theme-toggle { right: 20px; left: auto; }
 html[dir="ltr"] #lang-toggle { right: 80px; left: auto; }
+/* افترض أن الكلاس حق المنطقه اللي فيها الجدول اسمه table-container */
+.table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch; /* ضروري جداً عشان السحب يكون ناعم وسريع في الآيفون */
+    width: 100%;
+    white-space: nowrap; /* يمنع تداخل النصوص فوق بعضها */
+}
+/* هذا الكود يشتغل فقط على شاشات الجوال والآيباد الصغير */
+@media screen and (max-width: 768px) {
+    
+    /* 1. حول تخطيط الصفحة الأساسي من صف (أفقي) إلى عمود (رأسي) */
+    .dashboard-layout { /* الكلاس اللي يجمع القائمة الجانبية مع المحتوى */
+        flex-direction: column; 
+    }
+
+    /* 2. خل القائمة الجانبية تاخذ العرض كامل وتصير فوق بدال اليسار */
+    .sidebar {
+        width: 100%;
+        height: auto;
+        min-height: auto;
+        border-right: none;
+        border-bottom: 1px solid #eee;
+    }
+
+    /* 3. وسع منطقة المحتوى والجدول عشان تاخذ راحتها */
+    .main-content {
+        width: 100%;
+        padding: 10px;
+    }
+}
