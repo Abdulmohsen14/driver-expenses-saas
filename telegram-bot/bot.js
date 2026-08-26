@@ -3,39 +3,68 @@ const { Telegraf, Markup } = require('telegraf');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
-// =========================================================================
-// 1. إعدادات الاتصال بقاعدة البيانات (مخفية وآمنة 100%)
-// =========================================================================
 const serviceAccount = require('./serviceAccountKey.json');
 
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
-// توكن البوت (يفضل مستقبلاً تحطه في ملف .env أيضاً لمزيد من الأمان)
 const bot = new Telegraf('8927972087:AAGt8Y1x9tKDQUy3koQvA9ICfn2sLEaZ3-M');
 
-// =========================================================================
-// 2. ذاكرة مؤقتة لحفظ العمليات حتى يختار المستخدم السائق
-// =========================================================================
 const pendingTransactions = new Map();
 
-// =========================================================================
-// 3. المحلل المالي الذكي (The Smart Parser - SaaS Level)
-// =========================================================================
+const texts = {
+    ar: {
+        linkedSuccess: '✅ تم ربط حسابك بنجاح!\n\nأرسل رسائل البنك هنا، وسأقوم بفرزها وسؤالك عن السائق الذي تود إضافتها إليه.',
+        linkError: '❌ حدث خطأ أثناء الربط، يرجى المحاولة مرة أخرى.',
+        welcomeUnlinked: 'مرحباً بك! 🚗\nلتفعيل البوت، يرجى الذهاب إلى لوحة التحكم في الموقع والضغط على "ربط الحساب".',
+        analyzing: '⏳ جاري التحليل الذكي للعملية...',
+        notLinked: '⚠️ حسابك غير مربوط. يرجى ربط حسابك من إعدادات الموقع أولاً.',
+        noAmount: '❌ لم أتمكن من استخراج المبلغ، الرجاء التأكد من صيغة الرسالة.',
+        noDrivers: '⚠️ لم تقم بإضافة أي سائق في الموقع حتى الآن! أضف سائقاً لتسجيل المصاريف.',
+        cashback: (amount, card) => '✅ تم رصد استرجاع/كاش باك!\nالمبلغ: ' + amount + ' SAR\nالبطاقة: ' + card + '\n\n⏳ جاري البحث لربطه بالعمليات السابقة...',
+        purchaseSingle: (amount, shop, driver) => '✅ تم بنجاح! رصدت مبلغ ' + amount + ' ريال من ' + shop + '، وتمت إضافتها للسائق الوحيد: ' + driver,
+        purchaseMulti: (shop, amount, card) => '✅ رصدت عملية شراء!\nالمحل: ' + shop + '\nالمبلغ: ' + amount + ' SAR\nالبطاقة: ' + card + '\n\n👇 اختر السائق الذي تود تسجيل العملية عليه:',
+        sysError: '❌ حدث خطأ في النظام أثناء معالجة العملية.',
+        expiredCb: '⚠️ انتهت صلاحية هذه العملية أو تمت إضافتها مسبقاً.',
+        savedSuccess: (amount) => '✅ ممتاز! تم حفظ عملية بقيمة ' + amount + ' ريال بنجاح في حساب السائق المحدد.',
+        saveError: '❌ حدث خطأ أثناء الحفظ.',
+        logCashbackFound: (merchant) => '✅ تم الاصطياد! هذا الكاش باك يتبع لعملية ' + merchant + '.',
+        logCashbackNotFound: '⚠️ تم تسجيل الكاش باك، لكن لم نجد عملية سابقة مطابقة.',
+        logSearchCashback: (amount) => '⏳ جاري البحث عن العملية الأصلية لربط الكاش باك (مبلغ: ' + amount + ')...'
+    },
+    en: {
+        linkedSuccess: '✅ Account linked successfully!\n\nSend bank messages here, and I will parse them and ask which driver to assign them to.',
+        linkError: '❌ Error during linking, please try again.',
+        welcomeUnlinked: 'Welcome! 🚗\nTo activate the bot, please go to the website dashboard and click "Link Account".',
+        analyzing: '⏳ Smart analysis in progress...',
+        notLinked: '⚠️ Your account is not linked. Please link it from the website settings first.',
+        noAmount: '❌ Could not extract the amount. Please check the message format.',
+        noDrivers: '⚠️ You have not added any drivers yet! Add a driver to record expenses.',
+        cashback: (amount, card) => '✅ Cashback detected!\nAmount: ' + amount + ' SAR\nCard: ' + card + '\n\n⏳ Searching to link with previous transactions...',
+        purchaseSingle: (amount, shop, driver) => '✅ Success! Detected ' + amount + ' SAR from ' + shop + ', added to your only driver: ' + driver,
+        purchaseMulti: (shop, amount, card) => '✅ Purchase detected!\nMerchant: ' + shop + '\nAmount: ' + amount + ' SAR\nCard: ' + card + '\n\n👇 Choose the driver for this transaction:',
+        sysError: '❌ A system error occurred while processing.',
+        expiredCb: '⚠️ This transaction expired or was already added.',
+        savedSuccess: (amount) => '✅ Excellent! Transaction of ' + amount + ' SAR successfully saved to the selected driver.',
+        saveError: '❌ Error occurred while saving.',
+        logCashbackFound: (merchant) => '✅ Caught! This cashback belongs to the transaction at ' + merchant + '.',
+        logCashbackNotFound: '⚠️ Cashback recorded, but no matching previous transaction found.',
+        logSearchCashback: (amount) => '⏳ Searching for original transaction to link cashback (Amount: ' + amount + ')...'
+    }
+};
+
 function smartBankParser(message) {
-    // توحيد النص وتجهيزه
     const cleanText = message.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 
     const result = {
         type: 'UNKNOWN',
         amount: 0,
-        merchant: 'غير معروف',
+        merchant: 'Unknown',
         cardLast4: null,
         isCashback: false,
         rawDate: null
     };
 
-    // تحديد نوع العملية
     const cashbackKeywords = /كاش باك|استرجاع|مكافأة|مستردة|رد مبلغ|cashback|refund|reversal/;
     if (cashbackKeywords.test(cleanText)) {
         result.type = 'CASHBACK';
@@ -44,7 +73,6 @@ function smartBankParser(message) {
         result.type = 'PURCHASE';
     }
 
-    // استخراج المبلغ
     const amountRegex = /(?:sar|ريال|ر\.س|مبلغ|بـ|مال|money)?\s*(\d+(?:\.\d{1,2})?)\s*(?:sar|ريال|ر\.س)?/gi;
     let amounts = [];
     let match;
@@ -52,15 +80,13 @@ function smartBankParser(message) {
         amounts.push(parseFloat(match[1]));
     }
     if (amounts.length > 0) {
-        result.amount = amounts[0]; // نأخذ أول مبلغ (غالباً مبلغ الشراء وليس الرصيد المتبقي)
+        result.amount = amounts[0];
     }
 
-    // استخراج آخر 4 أرقام من البطاقة
     const cardRegex = /(?:بطاقة|إئتمانية|مدى|حساب|فيزا|ماستر|card|acct|x|[*#-])\s*(\d{4})\b/;
     const cardMatch = cleanText.match(cardRegex);
     if (cardMatch) result.cardLast4 = cardMatch[1];
 
-    // استخراج اسم المحل
     const merchantRegex = /(?:من|at)\s+([a-z\u0600-\u06FF\s]+)(?=\s+(?:بـ|في|بطاقة|إئتمانية|sar|ريال|ر\.س|\d))/i;
     const merchantMatch = cleanText.match(merchantRegex);
     if (merchantMatch && merchantMatch[1]) {
@@ -70,15 +96,11 @@ function smartBankParser(message) {
     return result;
 }
 
-// =========================================================================
-// 4. محرك ربط الكاش باك المبدئي (The Time-Travel Linker)
-// =========================================================================
-async function processCashbackMessage(parsedMessage, driverId) {
+async function processCashbackMessage(parsedMessage, driverId, t) {
     if (!parsedMessage.isCashback) return;
 
-    console.log(`⏳ جاري البحث عن العملية الأصلية لربط الكاش باك (مبلغ: ${parsedMessage.amount})...`);
+    console.log(t.logSearchCashback(parsedMessage.amount));
 
-    // (سيتم تطوير هذا الجزء لاحقاً للبحث المتقدم في فايربيس وخصم المبلغ من فاتورة قديمة)
     const foundOriginalTransaction = {
         id: "EXP_9921",
         merchant: "ALDREES",
@@ -88,90 +110,81 @@ async function processCashbackMessage(parsedMessage, driverId) {
     };
 
     if (foundOriginalTransaction) {
-        console.log(`✅ تم الاصطياد! هذا الكاش باك يتبع لعملية ${foundOriginalTransaction.merchant}.`);
+        console.log(t.logCashbackFound(foundOriginalTransaction.merchant));
     } else {
-        console.log(`⚠️ تم تسجيل الكاش باك، لكن لم نجد عملية سابقة مطابقة.`);
+        console.log(t.logCashbackNotFound);
     }
 }
 
-// =========================================================================
-// 5. أوامر البوت الأساسية (ربط الحساب)
-// =========================================================================
 bot.start(async (ctx) => {
     const payload = ctx.startPayload; 
     const telegramId = ctx.from.id;
+    const userLang = ctx.from.language_code && ctx.from.language_code.startsWith('ar') ? 'ar' : 'en';
+    const t = texts[userLang];
 
     if (payload) {
         try {
             const userRef = db.collection('users').doc(payload);
             await userRef.set({ telegramId: telegramId.toString() }, { merge: true });
             
-            ctx.reply('✅ تم ربط حسابك بنجاح!\n\nأرسل رسائل البنك هنا، وسأقوم بفرزها وسؤالك عن السائق الذي تود إضافتها إليه.');
+            ctx.reply(t.linkedSuccess);
         } catch (error) {
-            console.error("Error linking account:", error);
-            ctx.reply('❌ حدث خطأ أثناء الربط، يرجى المحاولة مرة أخرى.');
+            console.error(error);
+            ctx.reply(t.linkError);
         }
     } else {
-        ctx.reply('مرحباً بك! 🚗\nلتفعيل البوت، يرجى الذهاب إلى لوحة التحكم في الموقع والضغط على "ربط الحساب".');
+        ctx.reply(t.welcomeUnlinked);
     }
 });
 
-// =========================================================================
-// 6. العقل المدبر: استقبال الرسائل، التحليل الذكي، وإظهار أزرار السائقين
-// =========================================================================
 bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     const telegramUserId = ctx.from.id.toString();
+    const userLang = ctx.from.language_code && ctx.from.language_code.startsWith('ar') ? 'ar' : 'en';
+    const t = texts[userLang];
 
     if (text.startsWith('/start')) return; 
 
-    ctx.reply('⏳ جاري التحليل الذكي للعملية...');
+    ctx.reply(t.analyzing);
 
     try {
-        // التحقق من أن المستخدم مربوط
         const userQuery = await db.collection('users').where('telegramId', '==', telegramUserId).get();
         if (userQuery.empty) {
-            return ctx.reply('⚠️ حسابك غير مربوط. يرجى ربط حسابك من إعدادات الموقع أولاً.');
+            return ctx.reply(t.notLinked);
         }
 
         const userId = userQuery.docs[0].id;
-
-        // رمي النص في المحلل الذكي
         const parsedData = smartBankParser(text);
         
         if (parsedData.amount === 0) {
-            return ctx.reply('❌ لم أتمكن من استخراج المبلغ، الرجاء التأكد من صيغة الرسالة.');
+            return ctx.reply(t.noAmount);
         }
 
-        // مسار الكاش باك
         if (parsedData.isCashback) {
-            ctx.reply(`✅ تم رصد استرجاع/كاش باك!\nالمبلغ: ${parsedData.amount} SAR\nالبطاقة: ${parsedData.cardLast4}\n\n⏳ جاري البحث لربطه بالعمليات السابقة...`);
-            await processCashbackMessage(parsedData, telegramUserId);
-            return; // إنهاء التنفيذ هنا حتى لا يسأل عن السائق
+            ctx.reply(t.cashback(parsedData.amount, parsedData.cardLast4));
+            await processCashbackMessage(parsedData, telegramUserId, t);
+            return; 
         }
 
-        // مسار المشتريات وتجهيز البيانات لواجهة الموقع
         const formattedTransaction = {
-            shopName: parsedData.merchant || 'متجر غير معروف',
+            shopName: parsedData.merchant || (userLang === 'ar' ? 'متجر غير معروف' : 'Unknown Merchant'),
             amount: parsedData.amount,
             currency: 'SAR',
             cashback: 0,
-            date: new Date().toISOString().split('T')[0], // نأخذ تاريخ اليوم
+            date: new Date().toISOString().split('T')[0], 
             cardInfo: parsedData.cardLast4 || '----',
-            status: 'مكتملة',
+            status: userLang === 'ar' ? 'مكتملة' : 'Completed',
             type: 'purchase'
         };
 
-        // جلب قائمة السائقين
         const driversQuery = await db.collection('drivers').where('userId', '==', userId).get();
         if (driversQuery.empty) {
-            return ctx.reply('⚠️ لم تقم بإضافة أي سائق في الموقع حتى الآن! أضف سائقاً لتسجيل المصاريف.');
+            return ctx.reply(t.noDrivers);
         }
 
         let drivers = [];
         driversQuery.forEach(doc => drivers.push({ id: doc.id, name: doc.data().name }));
 
-        // إضافة تلقائية إذا كان هناك سائق واحد فقط
         if (drivers.length === 1) {
             const defaultDriverId = drivers[0].id;
             const docRef = db.collection('expenses').doc();
@@ -179,59 +192,55 @@ bot.on('text', async (ctx) => {
                 userId, driverId: defaultDriverId,
                 ...formattedTransaction, receiptUrl: null, createdAt: FieldValue.serverTimestamp()
             });
-            return ctx.reply(`✅ تم بنجاح! رصدت مبلغ ${formattedTransaction.amount} ريال من ${formattedTransaction.shopName}، وتمت إضافتها للسائق الوحيد: ${drivers[0].name}`);
+            return ctx.reply(t.purchaseSingle(formattedTransaction.amount, formattedTransaction.shopName, drivers[0].name));
         }
 
-        // إذا كان هناك أكثر من سائق، نعرض الأزرار
         pendingTransactions.set(telegramUserId, { userId, transactions: [formattedTransaction] });
-
         const buttons = drivers.map(d => [Markup.button.callback(`🚗 ${d.name}`, `driver_${d.id}`)]);
 
-        ctx.reply(`✅ رصدت عملية شراء!\nالمحل: ${formattedTransaction.shopName}\nالمبلغ: ${formattedTransaction.amount} SAR\nالبطاقة: ${formattedTransaction.cardInfo}\n\n👇 اختر السائق الذي تود تسجيل العملية عليه:`, 
+        ctx.reply(t.purchaseMulti(formattedTransaction.shopName, formattedTransaction.amount, formattedTransaction.cardInfo), 
             Markup.inlineKeyboard(buttons)
         );
 
     } catch (error) {
-        console.error("خطأ في نظام البوت:", error);
-        ctx.reply('❌ حدث خطأ في النظام أثناء معالجة العملية.');
+        console.error(error);
+        ctx.reply(t.sysError);
     }
 });
 
-// =========================================================================
-// 7. استجابة البوت عند ضغط المستخدم على زر السائق
-// =========================================================================
 bot.action(/^driver_(.+)$/, async (ctx) => {
     const driverId = ctx.match[1];
     const telegramUserId = ctx.from.id.toString();
+    const userLang = ctx.from.language_code && ctx.from.language_code.startsWith('ar') ? 'ar' : 'en';
+    const t = texts[userLang];
 
     const pendingData = pendingTransactions.get(telegramUserId);
 
     if (!pendingData) {
-        return ctx.answerCbQuery('⚠️ انتهت صلاحية هذه العملية أو تمت إضافتها مسبقاً.', { show_alert: true });
+        return ctx.answerCbQuery(t.expiredCb, { show_alert: true });
     }
 
     const { userId, transactions } = pendingData;
 
     try {
         const batch = db.batch();
-        transactions.forEach(t => {
+        transactions.forEach(tItem => {
             const docRef = db.collection('expenses').doc();
             batch.set(docRef, {
                 userId, driverId,
-                ...t, receiptUrl: null, createdAt: FieldValue.serverTimestamp()
+                ...tItem, receiptUrl: null, createdAt: FieldValue.serverTimestamp()
             });
         });
 
         await batch.commit();
         pendingTransactions.delete(telegramUserId);
 
-        ctx.editMessageText(`✅ ممتاز! تم حفظ عملية بقيمة ${transactions[0].amount} ريال بنجاح في حساب السائق المحدد.`);
+        ctx.editMessageText(t.savedSuccess(transactions[0].amount));
     } catch (error) {
-        console.error("Error saving batch:", error);
-        ctx.answerCbQuery('❌ حدث خطأ أثناء الحفظ.', { show_alert: true });
+        console.error(error);
+        ctx.answerCbQuery(t.saveError, { show_alert: true });
     }
 });
 
-// تشغيل البوت
 bot.launch();
-console.log('🤖 Telegram Bot is running with Smart Parser & Interactive Driver Selection...');
+console.log('Bot is running with multi-language support...');
