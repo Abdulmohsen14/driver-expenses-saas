@@ -3,7 +3,10 @@ const { Telegraf, Markup } = require('telegraf');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const express = require('express');
+const path = require('path');
 
+// 1. إعداد قاعدة البيانات بأمان
 let serviceAccount;
 try {
     serviceAccount = require('/etc/secrets/serviceAccountKey.json');
@@ -13,24 +16,24 @@ try {
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
+// 2. إعداد البوت والذكاء الاصطناعي (تم تصحيح الموديل إلى gemini-2.5-flash)
 const bot = new Telegraf(process.env.BOT_TOKEN || '8927972087:AAGt8Y1x9tKDQUy3koQvA9ICfn2sLEaZ3-M');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const pendingTransactions = new Map();
 
 async function aiBankParser(messageText) {
     const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         generationConfig: { responseMimeType: "application/json" }
     });
 
-    // برومبت أبسط وأوضح بكثير للذكاء الاصطناعي
     const prompt = `
-    أنت محلل بنكي. اقرأ الرسالة التالية واستخرج منها العمليات المالية (شراء أو كاش باك).
+    أنت محلل مالي دقيق. اقرأ الرسالة المالية التالية واستخرج جميع العمليات (شراء أو كاش باك/استرجاع).
     أرجع النتيجة حصرياً بصيغة JSON Array كالتالي بدون أي نص إضافي:
     [
       {
         "type": "purchase" أو "cashback",
-        "amount": 10.50,
+        "amount": 41.00,
         "merchant": "اسم المتجر"
       }
     ]
@@ -124,7 +127,7 @@ bot.on('text', async (ctx) => {
                     });
                 });
                 await pBatch.commit();
-                ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `✅ تم حفظ العمليات والكاش باك بنجاح للسائق ${drivers[0].name}`);
+                ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `✅ تم حفظ العمليات والكاش باك (${savedCount}) بنجاح للسائق ${drivers[0].name}`);
             } else {
                 ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `👇 تم رصد (${purchases.length}) مشتريات. اختر السائق لكل عملية:`);
                 for (const p of purchases) {
@@ -174,7 +177,11 @@ bot.action(/^assign_(.+?)_(.+)$/, async (ctx) => {
     }
 });
 
-const express = require('express');
+// 3. تشغيل خادم الويب وإرجاع الموقع للعمل بشكل طبيعي
 const app = express();
-app.listen(process.env.PORT || 3000, () => console.log(`Server running...`));
+const PORT = process.env.PORT || 3000;
+app.use(express.static(path.join(__dirname, '../')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../index.html')));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 bot.launch();
