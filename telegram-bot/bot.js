@@ -3,7 +3,12 @@ const { Telegraf, Markup } = require('telegraf');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
-const serviceAccount = require('./serviceAccountKey.json');
+let serviceAccount;
+try {
+    serviceAccount = require('/etc/secrets/serviceAccountKey.json');
+} catch (error) {
+    serviceAccount = require('./serviceAccountKey.json');
+}
 
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
