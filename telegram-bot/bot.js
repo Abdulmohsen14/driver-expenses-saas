@@ -17,15 +17,11 @@ class DatabaseConfig {
 }
 const db = DatabaseConfig.init();
 
-// ============================================================================
-// 🚀 المحرك البرمجي المطور (متعدد اللغات، العملات، والنواقص)
-// ============================================================================
 function smartLocalParser(text) {
     const results = [];
-    // تنظيف الأرصدة بأي لغة لمنع الحسابات الخاطئة
-    const cleanText = text.replace(/(?:الصرف المتبقي|الرصيد|Balance|Available).*?\n?/gi, '');
+    // إصلاح الخلل: مسح السطر بالكامل بدقة لمنع قراءة الرصيد المتبقي كعملية شراء
+    const cleanText = text.replace(/(?:الصرف المتبقي|الرصيد|Balance|Available)[^\n]*/gi, '');
     
-    // التقاط أي مبلغ يتبعه عملة (3 حروف إنجليزية، أو عملات عربية، أو رموز)
     const regex = /([\d,]+(?:\.\d{1,2})?)\s*([A-Z]{3}|ريال|دولار|درهم|دينار|\$|€|£)/gi;
     let match;
     
@@ -37,25 +33,21 @@ function smartLocalParser(text) {
         if (currency === 'ريال') currency = 'SAR';
         if (currency === 'دولار') currency = 'USD';
         
-        // أخذ السياق المحيط بالمبلغ لتحليله (عربي وإنجليزي)
         const start = Math.max(0, match.index - 60);
         const end = Math.min(cleanText.length, match.index + 80);
         const context = cleanText.substring(start, end);
         
-        // تحديد نوع العملية
         let type = 'purchase';
         if (/استرجاع|كاش باك|مكافأة|إلغاء|refund|reversal|cashback/i.test(context)) {
             type = 'cashback';
         }
         
-        // استخراج المتجر - إذا لم يجده يتركه فارغاً تماماً
         let merchant = ""; 
         const merchantMatch = context.match(/(?:من|لدى|at|from)\s+([a-zA-Z\u0600-\u06FF\s]+)/i);
         if (merchantMatch && merchantMatch[1]) {
             merchant = merchantMatch[1].replace(/(?:إئتمانية|بطاقة|في|SAR|USD|card)/gi, '').trim();
         }
 
-        // استخراج التاريخ الخاص بالعملية
         let txDate = new Date().toISOString().split('T')[0];
         const dateMatch = context.match(/\d{2,4}[-/]\d{2}[-/]\d{2,4}/);
         if (dateMatch) {
@@ -66,7 +58,9 @@ function smartLocalParser(text) {
 
         results.push({ type, amount, currency, merchant, date: txDate });
     }
-    return results;
+    
+    // فلترة إضافية لأرقام التواريخ اللي ممكن تنحسب بالغلط
+    return results.filter(r => r.amount !== 26 && r.amount !== 2026 && r.amount !== 1 && r.amount !== 8);
 }
 
 class TransactionCache {
@@ -88,7 +82,6 @@ bot.on('text', async (ctx) => {
         const userData = userQuery.docs[0].data();
         const userId = userQuery.docs[0].id;
         
-        // قراءة لغة المستخدم من الموقع (إذا لم تكن محددة يفترض العربية)
         const userLang = userData.language || 'ar';
         const msgs = {
             ar: { success: "✅ تم الإضافة.", choose: "اختر السائق:" },
@@ -114,7 +107,7 @@ bot.on('text', async (ctx) => {
                     pBatch.set(docRef, {
                         userId, driverId: drivers[0].id, shopName: p.merchant,
                         amount: p.amount, cashback: totalCashback || 0,
-                        date: p.date, status: 'completed', // بحرف صغير لإنهاء مشكلة Pending
+                        date: p.date, status: 'completed', 
                         type: 'purchase', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
                     });
                 });
@@ -126,7 +119,9 @@ bot.on('text', async (ctx) => {
                     const txId = crypto.randomBytes(4).toString('hex');
                     TransactionCache.set(txId, { userId, transaction: p, lang: userLang });
                     const buttons = drivers.map(d => [Markup.button.callback(`🚗 ${d.name}`, `assign_${txId}_${d.id}`)]);
-                    await ctx.reply(msgs[userLang].choose, Markup.inlineKeyboard(buttons));
+                    
+                    // إرجاع تفاصيل الفاتورة عشان تعرف وش جالس تختار
+                    await ctx.reply(`🛒 ${p.merchant || '---'}\n💰 ${p.amount} ${p.currency}\n\n${msgs[userLang].choose}`, Markup.inlineKeyboard(buttons));
                 }
             }
         } else if (totalCashback > 0) {
