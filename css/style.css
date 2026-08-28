@@ -59,7 +59,7 @@ body { font-family: 'IBM Plex Sans Arabic', sans-serif; background-color: var(--
 .divider span { padding: 0 10px; font-size: 12px; }
 
 /* الهيكل والجدول */
-.layout { width: 100%; display: flex; height: 100vh; }
+.layout { width: 100%; display: flex; height: 100vh; overflow: hidden; }
 .sidebar { width: 260px; background-color: var(--bg-surface); border-left: 1px solid rgba(130, 130, 130, 0.3) !important; display: flex; flex-direction: column; padding: 20px 0; }
 .sidebar .logo { padding: 0 24px 30px; font-size: 20px; font-weight: 700; color: var(--primary-accent); }
 .nav-menu { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
@@ -69,10 +69,11 @@ body { font-family: 'IBM Plex Sans Arabic', sans-serif; background-color: var(--
 .user-profile { padding: 20px 24px; border-top: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
 .user-profile img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
 .user-info { display: flex; flex-direction: column; }
-.main-content { flex: 1; display: flex; flex-direction: column; background-color: var(--bg-base); }
+.main-content { flex: 1; display: flex; flex-direction: column; background-color: var(--bg-base); overflow-y: auto;}
 .top-header { padding: 30px 40px; border-bottom: 1px solid var(--border-color); background: var(--bg-surface); }
 .top-header h1 { font-size: 24px; font-weight: 600; }
 .content-area { padding: 40px; flex: 1; overflow-y: auto; }
+
 /* تنسيقات التبديل بين الدخول والتسجيل */
 .switch-form-text { margin-top: 15px; font-size: 13px; color: var(--text-muted); }
 .text-link { color: var(--primary-accent); font-weight: 600; cursor: pointer; transition: 0.2s; }
@@ -133,33 +134,83 @@ html[dir="rtl"] #lang-toggle { left: 80px; right: auto; }
 /* الوضع الإنجليزي (LTR) - الأزرار يمين */
 html[dir="ltr"] #theme-toggle { right: 20px; left: auto; }
 html[dir="ltr"] #lang-toggle { right: 80px; left: auto; }
-/* افترض أن الكلاس حق المنطقه اللي فيها الجدول اسمه table-container */
-.table-container {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch; /* ضروري جداً عشان السحب يكون ناعم وسريع في الآيفون */
-    width: 100%;
-    white-space: nowrap; /* يمنع تداخل النصوص فوق بعضها */
-}
-/* هذا الكود يشتغل فقط على شاشات الجوال والآيباد الصغير */
+
+/* =========================================
+   📱 إعدادات شاشات الجوال (التجاوب الفعلي)
+========================================= */
 @media screen and (max-width: 768px) {
-    
-    /* 1. حول تخطيط الصفحة الأساسي من صف (أفقي) إلى عمود (رأسي) */
-    .dashboard-layout { /* الكلاس اللي يجمع القائمة الجانبية مع المحتوى */
+    /* 1. تحويل الشاشة من عرضي إلى طولي */
+    .layout { 
         flex-direction: column; 
+        height: 100vh; 
     }
 
-    /* 2. خل القائمة الجانبية تاخذ العرض كامل وتصير فوق بدال اليسار */
+    /* 2. تحويل الشريط الجانبي إلى شريط علوي (Navigation Bar) */
     .sidebar {
         width: 100%;
         height: auto;
-        min-height: auto;
-        border-right: none;
-        border-bottom: 1px solid #eee;
+        flex-direction: row; 
+        align-items: center;
+        padding: 10px;
+        border-left: none !important;
+        border-bottom: 1px solid var(--border-color);
+        z-index: 10;
     }
 
-    /* 3. وسع منطقة المحتوى والجدول عشان تاخذ راحتها */
+    /* إخفاء الشعار في الجوال لتوفير مساحة للأزرار */
+    .sidebar .logo {
+        display: none; 
+    }
+
+    /* 3. جعل أزرار التنقل (العمليات، التحليلات) أفقية وقابلة للسحب */
+    .nav-menu {
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 0;
+        gap: 8px;
+        margin-left: 10px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .nav-item {
+        white-space: nowrap;
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+
+    /* 4. ترتيب ملف المستخدم الشخصي */
+    .user-profile {
+        padding: 0 10px;
+        border-top: none;
+        border-right: 1px solid var(--border-color);
+    }
+
+    /* إخفاء اسم المستخدم في الجوال وترك الصورة فقط للترتيب */
+    #user-name, #logout-btn {
+        display: none !important;
+    }
+
+    /* 5. تضبيط مساحة المحتوى والجدول */
     .main-content {
         width: 100%;
-        padding: 10px;
+        overflow-y: auto;
+    }
+
+    .top-header {
+        padding: 15px 20px;
+    }
+
+    /* 6. أهم نقطة: جعل الجدول ينسحب يمين ويسار بسلاسة */
+    .content-area {
+        padding: 15px;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        width: 100%;
+    }
+    
+    /* منع تداخل نصوص الجدول فوق بعضها */
+    table {
+        white-space: nowrap;
+        width: 100%;
     }
 }
