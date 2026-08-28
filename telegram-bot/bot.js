@@ -2,7 +2,6 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf'); 
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -17,58 +16,67 @@ class DatabaseConfig {
     }
 }
 const db = DatabaseConfig.init();
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-class AIEngine {
-    static async extractFinancialData(text) {
-        // الاعتماد على الموديل المستقر 100% الذي لا يعطي خطأ 404 أبداً
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-        
-        const prompt = `
-        أنت محاسب مالي دقيق جداً. اقرأ الرسالة البنكية واستخرج العمليات المالية فقط.
-        
-        قواعد صارمة جداً:
-        1. استخرج (المبالغ المدفوعة للمشتريات) و (المبالغ المسترجعة/الكاش باك).
-        2. استخرج تاريخ العملية (حوله لصيغة YYYY-MM-DD)، إذا لم تجد تاريخاً استخدم تاريخ اليوم.
-        3. تجاهل تماماً: الأوقات (مثل 09:21)، أرقام البطاقات، والرصيد المتبقي (مثل الصرف المتبقي 2795.15). لا تعتبرها مبالغ مالية أبداً.
-        4. حدد العملة الصحيحة.
-        5. أرجع النتيجة كمصفوفة JSON (Array) نقية فقط.
-        
-        صيغة الإخراج المطلوبة:
-        [
-          {"type": "purchase", "amount": 5.00, "merchant": "Khairat A", "currency": "SAR", "date": "2026-08-01"},
-          {"type": "cashback", "amount": 0.04, "merchant": "استرجاع نقدي", "currency": "SAR", "date": "2026-08-01"}
-        ]
-
-        الرسالة:
-        ${text}
-        `;
-
-        const aiPromise = model.generateContent(prompt);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("AI_Timeout (انتهى الوقت)")), 15000));
-        
-        const result = await Promise.race([aiPromise, timeoutPromise]);
-        return this.parseJSON(result.response.text());
-    }
-
-    static parseJSON(rawText) {
-        const match = rawText.match(/\[[\s\S]*\]/);
-        if (!match) return [];
-        try {
-            const data = JSON.parse(match[0]);
-            return data.map(item => ({
-                type: String(item.type).toLowerCase().includes('cash') ? 'cashback' : 'purchase',
-                amount: Math.abs(parseFloat(item.amount)) || 0,
-                merchant: String(item.merchant || 'متجر غير معروف').trim(),
-                currency: String(item.currency || 'SAR').trim(),
-                date: String(item.date || new Date().toISOString().split('T')[0]).trim()
-            })).filter(i => i.amount > 0);
-        } catch (e) {
-            return [];
+// ============================================================================
+// 🚀 المحرك المحلي المستقل (بدون ذكاء اصطناعي - سرعة 0.001 ثانية)
+// ============================================================================
+function smartLocalParser(text) {
+    const results = [];
+    
+    // 1. تنظيف سطر الصرف المتبقي بالكامل لمنع أي حسابات خاطئة
+    const cleanText = text.replace(/الصرف المتبقي.*?\n?/g, '');
+    
+    // 2. سحب التاريخ الصحيح من الرسالة وتحويله (YYYY-MM-DD)
+    let dateMatch = cleanText.match(/\d{2}\/\d{2}\/\d{2}/);
+    let txDate = new Date().toISOString().split('T')[0];
+    if (dateMatch) {
+        const parts = dateMatch[0].split('/');
+        if(parts.length === 3) {
+            txDate = `20${parts[2]}-${parts[1]}-${parts[0]}`; 
         }
     }
+
+    // 3. البحث فقط عن المبالغ المسبوقة بـ "مبلغ" أو "بـ" لمنع سحب التواريخ
+    const regex = /(?:مبلغ|بـ)\s*([\d,]+(?:\.\d{1,2})?)\s*(SAR|USD|EUR|ريال|دولار)/gi;
+    let match;
+    
+    while ((match = regex.exec(cleanText)) !== null) {
+        const amount = parseFloat(match[1].replace(/,/g, ''));
+        if (amount <= 0) continue;
+
+        let currency = match[2].toUpperCase();
+        if (currency === 'ريال') currency = 'SAR';
+        if (currency === 'دولار') currency = 'USD';
+        
+        // سحب السياق لتحديد نوع العملية والمتجر
+        const start = Math.max(0, match.index - 80);
+        const end = Math.min(cleanText.length, match.index + 120);
+        const context = cleanText.substring(start, end);
+        
+        let type = 'purchase';
+        let merchant = 'متجر غير معروف';
+        
+        if (/استرجاع|كاش باك|مكافأة|إلغاء|refund/i.test(context)) {
+            type = 'cashback';
+            merchant = 'استرجاع نقدي';
+        } else {
+            // سحب اسم المتجر الدقيق الموجود بعد كلمة "من" أو "لدى"
+            const merchantMatch = context.match(/(?:من|لدى)\s+([^\n]+)/);
+            if (merchantMatch) {
+                merchant = merchantMatch[1].trim();
+                merchant = merchant.split(/(?:إئتمانية|بطاقة|في\s\d|SAR)/)[0].trim();
+            }
+        }
+        
+        results.push({ type, amount, currency, merchant, date: txDate });
+    }
+    
+    return results;
 }
 
+// ============================================================================
+// إدارة الذاكرة والبوت
+// ============================================================================
 class TransactionCache {
     static cache = new Map();
     static set(id, data) { this.cache.set(id, { ...data, timestamp: Date.now() }); }
@@ -81,31 +89,23 @@ const bot = new Telegraf(process.env.BOT_TOKEN || '8927972087:AAGt8Y1x9tKDQUy3ko
 bot.on('text', async (ctx) => {
     if (ctx.message.text.startsWith('/start')) return;
 
-    let statusMsg;
-    try { statusMsg = await ctx.reply('🧠 جاري التحليل الذكي للرسالة...'); } catch (e) { return; }
-
     try {
         const userQuery = await db.collection('users').where('telegramId', '==', ctx.from.id.toString()).get();
-        if (userQuery.empty) return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '⚠️ حسابك غير مربوط بالموقع.');
+        if (userQuery.empty) return ctx.reply('⚠️ حسابك غير مربوط بالموقع.');
 
         const userId = userQuery.docs[0].id;
         
-        let transactions;
-        try {
-            transactions = await AIEngine.extractFinancialData(ctx.message.text);
-        } catch (aiError) {
-            console.error("AI Error:", aiError.message);
-            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `❌ خطأ فني: ${aiError.message}`);
-        }
+        // استدعاء المحرك المحلي المباشر
+        const transactions = smartLocalParser(ctx.message.text);
 
-        if (!transactions || transactions.length === 0) {
-            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ لم يتم العثور على عمليات مالية مدفوعة في الرسالة.');
+        if (transactions.length === 0) {
+            return ctx.reply('❌ لم يتم العثور على مبالغ مالية صالحة في الرسالة.');
         }
 
         const driversQuery = await db.collection('drivers').where('userId', '==', userId).get();
         const drivers = driversQuery.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
 
-        if (drivers.length === 0) return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '⚠️ لا يوجد لديك سائقين مسجلين.');
+        if (drivers.length === 0) return ctx.reply('⚠️ لا يوجد لديك سائقين مسجلين.');
 
         const batch = db.batch();
         const purchases = [];
@@ -115,7 +115,7 @@ bot.on('text', async (ctx) => {
             if (t.type === 'cashback') {
                 const docRef = db.collection('expenses').doc();
                 batch.set(docRef, {
-                    userId, driverId: drivers[0].id, shopName: `[استرجاع] ${t.merchant}`,
+                    userId, driverId: drivers[0].id, shopName: t.merchant,
                     amount: `${t.amount} ${t.currency}`, date: t.date, status: 'Completed',
                     type: 'cashback', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
                 });
@@ -139,10 +139,10 @@ bot.on('text', async (ctx) => {
                     });
                 });
                 await pBatch.commit();
-                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
+                ctx.reply(`✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
             } else {
                 let replyText = savedCashback > 0 ? `✅ تم حفظ (${savedCashback}) كاش باك.\n\n👇 اختر السائق لـ (${purchases.length}) مشتريات:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
-                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, replyText);
+                await ctx.reply(replyText);
                 
                 for (const p of purchases) {
                     const txId = crypto.randomBytes(4).toString('hex');
@@ -152,12 +152,12 @@ bot.on('text', async (ctx) => {
                 }
             }
         } else {
-            ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `✅ تم حفظ (${savedCashback}) عمليات كاش باك في النظام.`);
+            ctx.reply(`✅ تم حفظ (${savedCashback}) عمليات كاش باك في النظام.`);
         }
 
     } catch (error) {
         console.error("System Error:", error);
-        ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ حدث فشل داخلي في النظام.');
+        ctx.reply('❌ حدث فشل داخلي في النظام.');
     }
 });
 
@@ -183,6 +183,9 @@ bot.action(/^assign_([a-z0-9]+)_(.+)$/, async (ctx) => {
     }
 });
 
+// ============================================================================
+// السيرفر الداعم للموقع
+// ============================================================================
 const app = express();
 app.use(express.static(path.join(__dirname, '../')));
 app.get('/', (req, res) => res.sendFile(path.resolve(__dirname, '../index.html')));
