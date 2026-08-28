@@ -1,41 +1,36 @@
 // ==========================================
-// 1. SECURITY LAYER (Prevent code inspection)
+// 1. أكواد الحماية (منع المتطفلين من فحص الموقع)
 // ==========================================
 try {
-    // Disable right-click
-    document.addEventListener('contextmenu', event => event.preventDefault()); 
-    // Disable Developer Tools shortcuts
+    document.addEventListener('contextmenu', event => event.preventDefault()); // منع كليك يمين
     document.onkeydown = function(e) {
-        if(e.keyCode == 123) return false; 
-        if(e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) return false; 
-        if(e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) return false; 
-        if(e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) return false; 
+        if(e.keyCode == 123) return false; // منع F12
+        if(e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) return false; // Ctrl+Shift+I
+        if(e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) return false; // Ctrl+Shift+J
+        if(e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) return false; // Ctrl+U (Source)
     }
-} catch (err) { console.warn("Security layer error initialized"); }
+} catch (err) { console.warn("Security layer error"); }
 
 // ==========================================
-// 2. IMPORTS & GLOBAL CONFIGURATIONS
+// 2. الاستدعاءات والإعدادات الأساسية
 // ==========================================
 import { db } from './firebase-config.js';
 import { collection, query, where, doc, deleteDoc, updateDoc, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getAuth, verifyBeforeUpdateEmail, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, updateEmail, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
 const auth = getAuth();
 const contentArea = document.querySelector('.content-area');
 const navItems = document.querySelectorAll('.nav-item');
-
-// Telegram Bot Username
-const BOT_USERNAME = "DriverExpenseTrackerBot"; 
+const BOT_USERNAME = "DriverExpenseTrackerBot"; // اسم بوت التيليجرام الخاص بك
 
 let currentUser = null;
 let unsubscribeExpenses = null;
 let unsubscribeDrivers = null;
 let unsubscribeDashboardDrivers = null;
 let activeDriverId = null; 
+window.userTelegramLinked = false; // متغير عالمي يراقب حالة التيليجرام بدون قلتش
 
-// Global flag to monitor Telegram linking status
-window.userTelegramLinked = false; 
-
-// Restore user language preference on load
+// استرجاع اللغة
 try {
     const savedLang = localStorage.getItem('site_lang');
     if (savedLang === 'en') {
@@ -44,7 +39,6 @@ try {
         window.addEventListener('DOMContentLoaded', () => {
             const langBtn = document.getElementById('lang-toggle');
             if (langBtn) langBtn.textContent = 'ع';
-            translateStaticHTML(true); // Translate static UI immediately
         });
     }
 } catch(e) {}
@@ -55,65 +49,8 @@ function cleanupSubscriptions() {
     if (unsubscribeDashboardDrivers) unsubscribeDashboardDrivers();
 }
 
-// Static HTML Translation Manager (Logo, Nav, Auth Forms)
-function translateStaticHTML(isEn) {
-    // 1. Translate Logo in Auth & Sidebar
-    document.querySelectorAll('.logo').forEach(el => {
-        el.innerHTML = isEn ? '<i class="fa-solid fa-money-check-dollar"></i> Driver Expenses' : '<i class="fa-solid fa-money-check-dollar"></i> مصاريف السائق';
-    });
-
-    // 2. Translate Sidebar Navigation & Logout
-    document.querySelectorAll('.nav-item').forEach(el => {
-        const target = el.getAttribute('data-target');
-        if (target === 'manage') {
-            el.innerHTML = isEn ? '<i class="fa-solid fa-receipt"></i> Operations' : '<i class="fa-solid fa-receipt"></i> العمليات';
-        } else if (target === 'analytics') {
-            el.innerHTML = isEn ? '<i class="fa-solid fa-chart-line"></i> Analytics' : '<i class="fa-solid fa-chart-line"></i> التحليلات';
-        } else if (target === 'drivers') {
-            el.innerHTML = isEn ? '<i class="fa-solid fa-users"></i> Drivers' : '<i class="fa-solid fa-users"></i> السائقين';
-        }
-    });
-    
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) logoutBtn.textContent = isEn ? 'Logout' : 'تسجيل خروج';
-
-    // 3. Translate Login Screen
-    const loginBox = document.getElementById('login-form-container');
-    if(loginBox) {
-        loginBox.querySelector('h2').textContent = isEn ? 'Welcome Back' : 'مرحباً بك';
-        loginBox.querySelector('p').textContent = isEn ? 'Login to access your account' : 'سجل دخولك للوصول إلى حسابك';
-        document.getElementById('login-email').placeholder = isEn ? 'Email' : 'البريد الإلكتروني';
-        document.getElementById('login-password').placeholder = isEn ? 'Password' : 'كلمة المرور';
-        document.getElementById('email-login-btn').textContent = isEn ? 'Login' : 'دخول';
-        loginBox.querySelector('.switch-form-text').innerHTML = isEn 
-            ? 'Don\'t have an account? <span id="show-signup" class="text-link">Create new account</span>' 
-            : 'ليس لديك حساب؟ <span id="show-signup" class="text-link">أنشئ حساباً جديداً</span>';
-    }
-    
-    // 4. Translate Sign Up Screen
-    const signupBox = document.getElementById('signup-form-container');
-    if(signupBox) {
-        signupBox.querySelector('h2').textContent = isEn ? 'New Account' : 'حساب جديد';
-        signupBox.querySelector('p').textContent = isEn ? 'Enter details to create account' : 'أدخل بياناتك لإنشاء حسابك الخاص';
-        document.getElementById('signup-name').placeholder = isEn ? 'Full Name' : 'الاسم الكامل';
-        document.getElementById('signup-email').placeholder = isEn ? 'Email' : 'البريد الإلكتروني';
-        document.getElementById('signup-password').placeholder = isEn ? 'Password' : 'كلمة المرور';
-        document.getElementById('signup-password-confirm').placeholder = isEn ? 'Confirm Password' : 'تأكيد كلمة المرور';
-        document.getElementById('email-signup-btn').textContent = isEn ? 'Create Account' : 'إنشاء الحساب';
-        signupBox.querySelector('.switch-form-text').innerHTML = isEn 
-            ? 'Already have an account? <span id="show-login" class="text-link">Login</span>' 
-            : 'لديك حساب بالفعل؟ <span id="show-login" class="text-link">سجل دخولك</span>';
-    }
-
-    // 5. Translate Google Auth Button & Divider
-    const divOr = document.querySelector('.divider span');
-    if(divOr) divOr.textContent = isEn ? 'OR' : 'أو';
-    const googleBtn = document.getElementById('google-login-btn');
-    if(googleBtn) googleBtn.innerHTML = isEn ? '<i class="fa-brands fa-google"></i> Continue with Google' : '<i class="fa-brands fa-google"></i> المتابعة باستخدام Google';
-}
-
 // ==========================================
-// 3. TELEGRAM OBSERVER (Background Listener)
+// 3. مراقب التيليجرام الذكي (يعمل بالخلفية)
 // ==========================================
 function startTelegramObserver(uid) {
     try {
@@ -122,33 +59,30 @@ function startTelegramObserver(uid) {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 window.userTelegramLinked = !!data.telegramId;
-                updateTelegramButtonUI();
+                updateTelegramButtonUI(); // تحديث الزر برمجياً لو كان موجود بالشاشة
             }
         });
     } catch (error) {
-        console.error("Telegram observer error initialized");
+        console.error("Error with observer");
     }
 }
 
 function updateTelegramButtonUI() {
     const btn = document.getElementById('dynamic-telegram-btn');
     if (!btn) return;
-    const isEn = document.documentElement.lang === 'en'; 
-
+    
     if (window.userTelegramLinked) {
-        btn.innerHTML = `<i class="fa-solid fa-plus"></i> ${isEn ? 'Add Expense' : 'إضافة مشتريات'}`;
-        btn.style.backgroundColor = '#2ecc71';
+        btn.innerHTML = '➕ إضافة مشتريات';
+        btn.style.backgroundColor = '#28a745';
         btn.onclick = () => window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
     } else {
-        btn.innerHTML = `<i class="fa-brands fa-telegram"></i> ${isEn ? 'Link Bot' : 'ربط البوت'}`;
+        btn.innerHTML = '🤖 ربط البوت';
         btn.style.backgroundColor = '#0088cc';
         btn.onclick = () => window.open(`https://t.me/${BOT_USERNAME}?start=${currentUser.uid}`, '_blank');
     }
-}  
+}
 
-// ==========================================
-// 4. NAVIGATION ROUTING
-// ==========================================
+// التنقل بين الصفحات
 navItems.forEach(item => {
     item.addEventListener('click', () => {
         try {
@@ -157,22 +91,21 @@ navItems.forEach(item => {
             cleanupSubscriptions();
             
             const target = item.getAttribute('data-target');
-            const isEn = document.documentElement.lang === 'en'; 
-
             if (target === 'manage') {
-                document.getElementById('page-title').textContent = isEn ? 'Operations Management' : 'إدارة العمليات';
+                document.getElementById('page-title').textContent = "إدارة العمليات";
                 renderDashboard();
                 fetchDashboardDrivers();
             } else if (target === 'analytics') {
-                document.getElementById('page-title').textContent = isEn ? 'Analytics' : 'لوحة التحليلات';
+                document.getElementById('page-title').textContent = "لوحة التحليلات";
                 renderAnalyticsPage();
                 fetchAnalyticsData();
             } else if (target === 'drivers') {
-                document.getElementById('page-title').textContent = isEn ? 'Drivers Management' : 'إدارة السائقين';
-                renderDriverPage();
+                document.getElementById('page-title').textContent = "إدارة السائقين";
+                renderDriversPage();
+                fetchDriversList();
             }
         } catch (error) {
-            console.error("Navigation routing error", error);
+            Swal.fire({ icon: 'error', title: 'خطأ بالنظام', text: 'حدث خطأ أثناء تحميل الصفحة.' });
         }
     });
 });
@@ -185,48 +118,47 @@ document.getElementById('settings-btn').addEventListener('click', () => {
 
 window.addEventListener('userLoggedIn', (e) => {
     currentUser = e.detail;
-    startTelegramObserver(currentUser.uid); 
+    startTelegramObserver(currentUser.uid); // تشغيل المراقب بصمت
     document.querySelector('[data-target="manage"]').click();
 });
 
 // ==========================================
-// 5. OPERATIONS MANAGEMENT MODULE
+// 4. صفحة العمليات (إدارة العمليات)
 // ==========================================
 function renderDashboard() {
-    const isEn = document.documentElement.lang === 'en';
-    
     contentArea.innerHTML = `
         <div id="dashboard-driver-tabs" style="display: flex; gap: 10px; margin-bottom: 25px; overflow-x: auto; padding-bottom: 5px;">
-            <span style="color: var(--text-muted); font-size: 13px;">${isEn ? 'Loading drivers...' : 'جاري تحميل السائقين...'}</span>
+            <span style="color: var(--text-muted); font-size: 13px;">جاري تحميل السائقين...</span>
         </div>
 
         <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${isEn ? 'Expenses History' : 'سجل العمليات'}</h3>
+            <h3 style="font-size: 18px; font-weight: 600; margin: 0;">سجل العمليات</h3>
+            <!-- زر التيليجرام الديناميكي الذي يتغير بناءً على حالة الربط -->
             <button id="dynamic-telegram-btn" class="btn-primary" style="flex: none; width: auto; font-size: 13px; padding: 8px 15px; font-weight:bold;">
-                ${isEn ? '⏳ Checking...' : '⏳ جاري التحقق...'}
+                ⏳ جاري التحقق...
             </button>
         </div>
         
         <div class="table-container" style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; overflow-x: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: ${isEn ? 'left' : 'right'};">
+            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: right;">
                 <thead style="background-color: rgba(150, 150, 150, 0.05);">
                     <tr>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Store' : 'المتجر'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Date' : 'التاريخ'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Amount' : 'المبلغ'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Cashback' : 'الكاش باك'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Status' : 'الحالة'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Receipt' : 'الفاتورة'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Action' : 'إجراء'}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">المتجر</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">التاريخ</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">المبلغ</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">الكاش باك</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">الحالة</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">الفاتورة</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">إجراء</th>
                     </tr>
                 </thead>
                 <tbody id="expenses-tbody">
-                    <tr><td colspan="7" style="text-align: center; padding: 30px; color: var(--text-muted);">${isEn ? 'Please add and select a driver to view expenses.' : 'الرجاء إضافة واختيار سائق لعرض عملياته.'}</td></tr>
+                    <tr><td colspan="7" style="text-align: center; padding: 30px; color: var(--text-muted);">الرجاء إضافة واختيار سائق لعرض عملياته.</td></tr>
                 </tbody>
             </table>
         </div>
     `;
-    updateTelegramButtonUI(); 
+    updateTelegramButtonUI(); // تحديث الزر فوراً بعد رسمه
 }
 
 function fetchDashboardDrivers() {
@@ -235,11 +167,10 @@ function fetchDashboardDrivers() {
         unsubscribeDashboardDrivers = onSnapshot(q, (snapshot) => {
             const tabsContainer = document.getElementById('dashboard-driver-tabs');
             if (!tabsContainer) return;
-            const isEn = document.documentElement.lang === 'en';
             tabsContainer.innerHTML = '';
             
             if (snapshot.empty) {
-                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">${isEn ? 'No drivers. Go to Drivers page to add.' : 'لا يوجد سائقين. اذهب لصفحة "السائقين" من القائمة للإضافة.'}</span>`;
+                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">لا يوجد سائقين. اذهب لصفحة "السائقين" من القائمة للإضافة.</span>`;
                 activeDriverId = null;
                 if (unsubscribeExpenses) unsubscribeExpenses();
                 return;
@@ -270,28 +201,27 @@ function fetchDashboardDrivers() {
                     </button>
                 `;
             });
+
             fetchUserExpenses(activeDriverId);
         });
     } catch (error) {
-        console.error("Drivers fetching error initialized");
+        console.error("Error fetching drivers");
     }
 }
 
 function fetchUserExpenses(driverId) {
     if (!driverId) return;
-    if (window.unsubscribeExpenses) window.unsubscribeExpenses();
+    if (unsubscribeExpenses) unsubscribeExpenses();
     
     try {
         const q = query(collection(db, "expenses"), where("userId", "==", currentUser.uid), where("driverId", "==", driverId));
         const tbody = document.getElementById('expenses-tbody');
 
-        window.unsubscribeExpenses = onSnapshot(q, (snapshot) => {
+        unsubscribeExpenses = onSnapshot(q, (snapshot) => {
             if (!tbody) return;
-            const isEn = document.documentElement.lang === 'en'; 
             tbody.innerHTML = ''; 
-            
             if (snapshot.empty) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">${isEn ? 'No records found for this driver.' : 'لا توجد عمليات مسجلة لهذا السائق.'}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">لا توجد عمليات مسجلة لهذا السائق.</td></tr>`;
                 return;
             }
 
@@ -306,97 +236,91 @@ function fetchUserExpenses(driverId) {
 
             expensesArray.forEach((data) => {
                 const id = data.id;
-                const currency = isEn ? 'SAR' : 'ريال';
-                const statusText = data.status === 'مكتملة' ? (isEn ? 'Completed' : 'مكتملة') : (isEn ? 'Pending' : 'معلقة');
-                
                 const receiptBadge = data.receiptUrl 
-                    ? `<a href="${data.receiptUrl}" target="_blank" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none; display: inline-block;"><i class="fa-solid fa-check"></i> ${isEn ? 'Receipt' : 'الفاتورة'}</a>` 
-                    : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> ${isEn ? 'Attach' : 'إرفاق'}</button>`;
+                    ? `<a href="${data.receiptUrl}" target="_blank" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none; display: inline-block;"><i class="fa-solid fa-check"></i> الفاتورة</a>` 
+                    : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> إرفاق</button>`;
                     
                 tbody.innerHTML += `
                     <tr id="exp-row-${id}" style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
-                        <td class="col-shop" style="padding: 16px; font-weight: 500; text-align: ${isEn ? 'left' : 'right'};">${data.shopName || (isEn ? 'Unknown' : 'غير معروف')}</td>
-                        <td class="col-date" style="padding: 16px; color: var(--text-muted); font-size: 14px; text-align: ${isEn ? 'left' : 'right'};" dir="ltr">${data.date || '-'}</td>
-                        <td class="col-amount" style="padding: 16px; text-align: ${isEn ? 'left' : 'right'};" data-val="${data.amount || 0}">${data.amount || 0} ${currency}</td>
-                        <td class="col-cashback" style="padding: 16px; color: var(--success); text-align: ${isEn ? 'left' : 'right'};" data-val="${data.cashback || 0}">${data.cashback > 0 ? data.cashback + ' ' + currency : '-'}</td>
-                        <td class="col-status" style="padding: 16px; text-align: ${isEn ? 'left' : 'right'};">
-                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:6px; margin-right:6px; background-color:${data.status === 'مكتملة' ? '#2ecc71' : '#d4af37'}"></span> 
-                            ${statusText}
+                        <td class="col-shop" style="padding: 16px; font-weight: 500;">${data.shopName || 'غير معروف'}</td>
+                        <td class="col-date" style="padding: 16px; color: var(--text-muted); font-size: 14px;" dir="ltr">${data.date || '-'}</td>
+                        <td class="col-amount" style="padding: 16px;" data-val="${data.amount || 0}">${data.amount || 0} ريال</td>
+                        <td class="col-cashback" style="padding: 16px; color: var(--success);" data-val="${data.cashback || 0}">${data.cashback > 0 ? data.cashback + ' ريال' : '-'}</td>
+                        <td class="col-status" style="padding: 16px;">
+                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:6px; background-color:${data.status === 'مكتملة' ? '#2ecc71' : '#d4af37'}"></span> 
+                            ${data.status || 'معلقة'}
                         </td>
-                        <td style="padding: 16px; text-align: ${isEn ? 'left' : 'right'};">${receiptBadge}</td>
-                        <td class="col-actions" style="padding: 16px; white-space: nowrap; text-align: ${isEn ? 'left' : 'right'};">
-                            <button class="btn-text edit-expense-btn" data-id="${id}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 10px; border-radius: 6px; margin: 0 5px;" title="Edit"><i class="fa-solid fa-pen"></i></button>
-                            <button class="btn-text delete-btn" data-id="${id}" style="color: var(--danger); font-size: 15px; background: rgba(231, 76, 60, 0.1); padding: 6px 10px; border-radius: 6px;" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                        <td style="padding: 16px;">${receiptBadge}</td>
+                        <td class="col-actions" style="padding: 16px; white-space: nowrap;">
+                            <button class="btn-text edit-expense-btn" data-id="${id}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 10px; border-radius: 6px; margin-left: 5px;" title="تعديل"><i class="fa-solid fa-pen"></i></button>
+                            <button class="btn-text delete-btn" data-id="${id}" style="color: var(--danger); font-size: 15px; background: rgba(231, 76, 60, 0.1); padding: 6px 10px; border-radius: 6px;" title="حذف"><i class="fa-solid fa-trash"></i></button>
                         </td>
                     </tr>
                 `;
             });
         });
-    } catch(err) { console.error("Expenses rendering error"); }
+    } catch(err) {}
 }
 
 // ==========================================
-// 6. DRIVERS MANAGEMENT MODULE
+// 5. صفحة إدارة السائقين
 // ==========================================
 let driversExpensesUnsub = null;
 
-window.renderDriverPage = function() {
-    const isEn = document.documentElement.lang === 'en';
-    
+function renderDriversPage() {
     contentArea.innerHTML = `
         <div style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h3 id="form-title" style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">${isEn ? 'Add New Driver' : 'إضافة سائق جديد'}</h3>
+            <h3 id="form-title" style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">إضافة سائق جديد</h3>
             <form id="add-driver-form" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                 <input type="hidden" id="edit-driver-id" value="">
                 
                 <div style="flex: 1; min-width: 150px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">${isEn ? 'Driver Name (Required)' : 'اسم السائق (إلزامي)'}</label>
-                    <input type="text" id="driver-name" placeholder="${isEn ? 'Enter Name' : 'أدخل الاسم'}" required style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">اسم السائق (إلزامي)</label>
+                    <input type="text" id="driver-name" placeholder="أدخل الاسم" required style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
                 </div>
                 
                 <div style="flex: 1; min-width: 150px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">${isEn ? 'Car Model' : 'السيارة'}</label>
-                    <input type="text" id="driver-car" placeholder="${isEn ? 'e.g. Camry 2024' : 'مثال: كامري 2024'}" style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">السيارة</label>
+                    <input type="text" id="driver-car" placeholder="مثال: كامري 2024" style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
                 </div>
                 
                 <div style="flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 5px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 0px;">${isEn ? 'Card Type' : 'نوع البطاقة'}</label>
+                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 0px;">نوع البطاقة</label>
                     <div style="display: flex; gap: 5px; width: 100%;">
                         <select id="driver-card" style="flex: 1; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box; appearance: auto;">
-                            <option value="">${isEn ? 'Select...' : 'اختر...'}</option>
-                            <option value="مدى">${isEn ? 'Mada' : 'مدى'}</option>
-                            <option value="فيزا">${isEn ? 'Visa' : 'فيزا'}</option>
-                            <option value="ماستركارد">${isEn ? 'Mastercard' : 'ماستركارد'}</option>
-                            <option value="أخرى">${isEn ? 'Other (Type)' : 'أخرى (كتابة)'}</option>
+                            <option value="">اختر...</option>
+                            <option value="مدى">مدى</option>
+                            <option value="فيزا">فيزا</option>
+                            <option value="ماستركارد">ماستركارد</option>
+                            <option value="أخرى">أخرى (كتابة)</option>
                         </select>
-                        <input type="text" id="driver-card-other" placeholder="${isEn ? 'Type Card...' : 'اكتب نوع البطاقة...'}" style="display: none; flex: 1; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                        <input type="text" id="driver-card-other" placeholder="اكتب نوع البطاقة..." style="display: none; flex: 1; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
                     </div>
                 </div>
                 
-                <button type="submit" id="submit-driver-btn" class="btn-primary" style="flex: none; padding: 10px 25px; font-size: 14px; height: 42px; white-space: nowrap;"><i class="fa-solid fa-floppy-disk"></i> <span>${isEn ? 'Save' : 'حفظ'}</span></button>
-                <button type="button" id="cancel-edit-btn" style="display: none; background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 20px; border-radius: 8px; font-size: 14px; height: 42px; cursor: pointer;">${isEn ? 'Cancel' : 'إلغاء'}</button>
+                <button type="submit" id="submit-driver-btn" class="btn-primary" style="flex: none; padding: 10px 25px; font-size: 14px; height: 42px; white-space: nowrap;"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
+                <button type="button" id="cancel-edit-btn" style="display: none; background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 20px; border-radius: 8px; font-size: 14px; height: 42px; cursor: pointer;">إلغاء</button>
             </form>
         </div>
 
         <div class="table-container" style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; overflow-x: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: ${isEn ? 'left' : 'right'};">
+            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: right;">
                 <thead style="background-color: rgba(150, 150, 150, 0.05);">
                     <tr>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Driver Name' : 'اسم السائق'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Car Model' : 'السيارة'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Card Type' : 'نوع البطاقة'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${isEn ? 'Total Expenses' : 'مجموع المصاريف'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">${isEn ? 'Edit' : 'تعديل'}</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">${isEn ? 'Delete' : 'حذف'}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">اسم السائق</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">السيارة</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">نوع البطاقة</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">مجموع المصاريف</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">تعديل</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">حذف</th>
                     </tr>
                 </thead>
                 <tbody id="drivers-tbody">
-                    <tr><td colspan="6" style="text-align: center; padding: 30px; color: var(--text-muted);">${isEn ? 'Loading...' : 'جاري جلب السائقين...'}</td></tr>
+                    <tr><td colspan="6" style="text-align: center; padding: 30px; color: var(--text-muted);">جاري جلب السائقين...</td></tr>
                 </tbody>
             </table>
         </div>
     `;
-    fetchDriversList();
 }
 
 function fetchDriversList() {
@@ -411,12 +335,10 @@ function fetchDriversList() {
             if (window.driversExpensesUnsub) window.driversExpensesUnsub();
             
             window.driversExpensesUnsub = onSnapshot(expensesQ, (expenseSnapshot) => {
-                const isEn = document.documentElement.lang === 'en';
-                const currency = isEn ? 'SAR' : 'ريال';
                 tbody.innerHTML = '';
                 
                 if (driverSnapshot.empty) {
-                    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">${isEn ? 'No drivers found. Add one above.' : 'لا يوجد سائقين. قم بالإضافة بالأعلى.'}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">لا يوجد سائقين. قم بالإضافة بالأعلى.</td></tr>`;
                     return;
                 }
 
@@ -438,24 +360,18 @@ function fetchDriversList() {
                 driversArray.forEach((data) => {
                     const id = data.id;
                     const total = expensesTotal[id] || 0;
-                    let cardDisplay = data.cardType || '-';
-                    if (isEn) {
-                        if (cardDisplay === 'مدى') cardDisplay = 'Mada';
-                        if (cardDisplay === 'فيزا') cardDisplay = 'Visa';
-                        if (cardDisplay === 'ماستركارد') cardDisplay = 'Mastercard';
-                    }
                     
                     tbody.innerHTML += `
                         <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
                             <td style="padding: 16px; font-weight: 500;">${data.name}</td>
                             <td style="padding: 16px; color: var(--text-muted);">${data.car || '-'}</td>
-                            <td style="padding: 16px; color: var(--text-muted);">${cardDisplay}</td>
-                            <td style="padding: 16px; color: var(--danger); font-weight: bold;">${total} ${currency}</td>
+                            <td style="padding: 16px; color: var(--text-muted);">${data.cardType || '-'}</td>
+                            <td style="padding: 16px; color: var(--danger); font-weight: bold;">${total} ريال</td>
                             <td style="padding: 16px; text-align: center;">
-                                <button class="btn-text edit-driver-btn" data-id="${id}" data-name="${data.name}" data-car="${data.car || ''}" data-card="${data.cardType || ''}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 12px; border-radius: 6px;" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button class="btn-text edit-driver-btn" data-id="${id}" data-name="${data.name}" data-car="${data.car || ''}" data-card="${data.cardType || ''}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 12px; border-radius: 6px;" title="تعديل"><i class="fa-solid fa-pen-to-square"></i></button>
                             </td>
                             <td style="padding: 16px; text-align: center;">
-                                <button class="btn-text delete-driver-btn" data-id="${id}" style="color: var(--danger); font-size: 14px; background: rgba(231, 76, 60, 0.1); padding: 6px 12px; border-radius: 6px; font-weight: bold; transition: all 0.2s;" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                                <button class="btn-text delete-driver-btn" data-id="${id}" style="color: var(--danger); font-size: 14px; background: rgba(231, 76, 60, 0.1); padding: 6px 12px; border-radius: 6px; font-weight: bold; transition: all 0.2s;" title="حذف"><i class="fa-solid fa-trash"></i></button>
                             </td>
                         </tr>
                     `;
@@ -463,107 +379,123 @@ function fetchDriversList() {
             });
         });
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 20px;">Data Fetch Error</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 20px;">حدث خطأ في قراءة البيانات.</td></tr>`;
     }
 }
-
 // ==========================================
-// 7. SETTINGS & PROFILE MODULE
+// 6. صفحة الإعدادات
 // ==========================================
 function renderSettingsPage() {
-    const isEn = document.documentElement.lang === 'en';
-    document.getElementById('page-title').textContent = isEn ? "Account Settings" : "إعدادات الحساب";
+    document.getElementById('page-title').textContent = "إعدادات الحساب";
     const currentName = document.getElementById('user-name').textContent;
     const currentEmail = currentUser && currentUser.email ? currentUser.email : '';
     
     contentArea.innerHTML = `
         <div style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; padding: 35px; margin: 0 auto; max-width: 650px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h3 style="font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 25px; color: var(--primary-accent); border-bottom: 1px solid rgba(130,130,130,0.2); padding-bottom: 10px;">${isEn ? 'Personal Information' : 'المعلومات الشخصية'}</h3>
+            <h3 style="font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 25px; color: var(--primary-accent); border-bottom: 1px solid rgba(130,130,130,0.2); padding-bottom: 10px;">المعلومات الشخصية</h3>
 
             <form id="settings-form" style="display: flex; flex-direction: column; gap: 20px;">
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Name:' : 'الاسم:'}</label>
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">الاسم:</label>
                     <input type="text" id="settings-name-input" value="${currentName === '...' ? '' : currentName}" required autocomplete="off" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Email:' : 'الإيميل:'}</label>
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">الإيميل:</label>
                     <input type="email" id="settings-email-input" value="${currentEmail}" required autocomplete="off" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Password:' : 'الرقم السري:'}</label>
-                    <input type="password" id="settings-password-input" placeholder="********" autocomplete="new-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">الرقم السري:</label>
+                    <input type="password" id="settings-password-input" placeholder="******** (للتغيير اكتب هنا)" autocomplete="new-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
 
                 <div style="display: flex; gap: 15px; margin-top: 15px; justify-content: center;">
-                    <button type="submit" id="save-settings-btn" class="btn-primary" style="padding: 10px 50px; font-size: 15px; font-weight: 600; transition: 0.2s;">${isEn ? 'Save' : 'حفظ'}</button>
+                    <button type="button" id="cancel-settings-btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 40px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s;">إلغاء</button>
+                    <button type="submit" id="save-settings-btn" class="btn-primary" style="padding: 10px 50px; font-size: 15px; font-weight: 600; transition: 0.2s;">حفظ</button>
                 </div>
             </form>
+
+            <div id="otp-verification-section" style="display: none; text-align: center; padding: 20px;">
+                <i class="fa-solid fa-envelope-circle-check fa-3x" style="color: var(--primary-accent); margin-bottom: 15px;"></i>
+                <h4 style="font-size: 18px; margin-bottom: 10px;">تحقق من الإيميل الجديد</h4>
+                <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">أرسلنا رمز تحقق مكون من 6 أرقام إلى إيميلك. <br>(للتجربة حالياً اكتب: 123456)</p>
+                <input type="text" id="otp-input" placeholder="------" maxlength="6" style="text-align: center; letter-spacing: 15px; font-size: 24px; font-weight: bold; padding: 15px; width: 220px; margin: 0 auto 25px auto; display: block; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.5); border-radius: 8px; color: var(--text-primary); outline: none;">
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button type="button" id="cancel-otp-btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 30px; border-radius: 8px; cursor: pointer; font-weight: 600;">تراجع</button>
+                    <button type="button" id="confirm-otp-btn" class="btn-primary" style="padding: 10px 40px; font-weight: 600;">تأكيد الرمز</button>
+                </div>
+            </div>
         </div>
     `;
 }
 
 // ==========================================
-// 8. ANALYTICS & PDF EXPORT MODULE
+// 7. صفحة التحليلات (وإنشاء PDF) - التحديث الجذري
 // ==========================================
 let barChartInstance = null;
 let pieChartInstance = null;
 let lineChartInstance = null;
 let activeAnalyticsDriverId = null;
 let activeTimeRange = '1m'; 
-let globalDriversList = []; 
+let globalDriversList = []; // نحفظ السواقين هنا عشان نستخدمهم في رسم خطوط المقارنة
 
 function renderAnalyticsPage() {
-    const isEn = document.documentElement.lang === 'en'; 
-    
     contentArea.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <div id="analytics-driver-tabs" style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px;">
-                <span style="color: var(--text-muted); font-size: 13px;">${isEn ? 'Loading drivers...' : 'جاري تحميل السائقين...'}</span>
+                <span style="color: var(--text-muted); font-size: 13px;">جاري تحميل السائقين...</span>
             </div>
+            <!-- زر إنشاء التقرير PDF -->
             <button id="export-pdf-btn" class="btn-primary" style="flex: none; background-color: #e74c3c; border-color: #e74c3c; font-size: 13px; padding: 8px 15px; border-radius: 8px;">
-                <i class="fa-solid fa-file-pdf"></i> ${isEn ? 'Export PDF' : 'إنشاء تقرير PDF'}
+                <i class="fa-solid fa-file-pdf"></i> إنشاء تقرير PDF
             </button>
         </div>
 
         <div id="time-filters-container" style="display: flex; gap: 10px; margin-bottom: 25px; justify-content: center; flex-wrap: wrap; background: var(--bg-surface); padding: 10px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.2);">
-            <button class="time-filter-btn active" data-range="1m" style="padding: 6px 16px; border-radius: 20px; border: none; background: var(--primary-accent); color: white; cursor: pointer;">${isEn ? 'Month' : 'شهر'}</button>
-            <button class="time-filter-btn" data-range="3m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEn ? '3 Months' : '3 أشهر'}</button>
-            <button class="time-filter-btn" data-range="6m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEn ? '6 Months' : '6 أشهر'}</button>
-            <button class="time-filter-btn" data-range="1y" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEn ? 'Year' : 'سنة'}</button>
-            <button class="time-filter-btn" data-range="all" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEn ? 'All Time' : 'كل الأوقات'}</button>
+            <button class="time-filter-btn active" data-range="1m" style="padding: 6px 16px; border-radius: 20px; border: none; background: var(--primary-accent); color: white; cursor: pointer;">شهر</button>
+            <button class="time-filter-btn" data-range="3m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">3 أشهر</button>
+            <button class="time-filter-btn" data-range="6m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">6 أشهر</button>
+            <button class="time-filter-btn" data-range="1y" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">سنة</button>
+            <button class="time-filter-btn" data-range="all" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">كل الأوقات</button>
         </div>
 
+        <!-- المنطقة التي سيتم تحويلها لـ PDF -->
         <div id="pdf-export-area" style="background: var(--bg-base); padding: 15px; border-radius: 12px;">
+            
+            <!-- الصف الأول: الكروت الأساسية (2 فقط) -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 25px;">
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center;">
-                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-money-bill-wave"></i> ${isEn ? 'Total Expenses' : 'إجمالي الصرفية'}</div>
-                    <div id="stat-total-amt" style="font-size: 32px; font-weight: bold; color: var(--danger);">0 ${isEn ? 'SAR' : 'ريال'}</div>
+                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-money-bill-wave"></i> إجمالي الصرفية</div>
+                    <div id="stat-total-amt" style="font-size: 32px; font-weight: bold; color: var(--danger);">0 ريال</div>
                 </div>
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center;">
-                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-hand-holding-dollar"></i> ${isEn ? 'Cashback' : 'كاش باك مسترجع'}</div>
-                    <div id="stat-total-cb" style="font-size: 32px; font-weight: bold; color: #2ecc71;">0 ${isEn ? 'SAR' : 'ريال'}</div>
+                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-hand-holding-dollar"></i> كاش باك مسترجع</div>
+                    <div id="stat-total-cb" style="font-size: 32px; font-weight: bold; color: #2ecc71;">0 ريال</div>
                 </div>
             </div>
 
+            <!-- الصف الثاني: البار جراف (اليسار) والباى شارت (اليمين) -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                <!-- رسم الأعمدة -->
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); flex: 2;">
-                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">${isEn ? 'Highest Spending (Top 10 Stores)' : 'أكثر مبالغ تم صرفها (أعلى 10 محلات)'}</h3>
+                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">أكثر مبالغ تم صرفها (أعلى 10 محلات)</h3>
                     <div style="position: relative; height: 300px; width: 100%;">
                         <canvas id="barChart"></canvas>
                     </div>
                 </div>
+                <!-- رسم الدائرة -->
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); flex: 1;">
-                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">${isEn ? 'Expenses Distribution (%)' : 'توزيع المصاريف (النسب المئوية)'}</h3>
+                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">توزيع المصاريف (النسب المئوية)</h3>
                     <div style="position: relative; height: 300px; width: 100%;">
                         <canvas id="pieChart"></canvas>
                     </div>
                 </div>
             </div>
 
+            <!-- الصف الثالث: الرسم الخطي لمقارنة كل السواقين -->
             <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
-                <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">${isEn ? 'Drivers Comparison Over Time' : 'مقارنة صرف السائقين عبر الزمن'}</h3>
+                <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">مقارنة صرف السائقين عبر الزمن</h3>
                 <div style="position: relative; height: 350px; width: 100%;">
                     <canvas id="lineChart"></canvas>
                 </div>
@@ -586,7 +518,7 @@ window.fetchAnalyticsData = function() {
             snapshot.forEach(docSnap => globalDriversList.push({ id: docSnap.id, ...docSnap.data() }));
 
             if (globalDriversList.length === 0) {
-                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">No drivers available.</span>`;
+                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">لا يوجد سائقين.</span>`;
                 return;
             }
 
@@ -608,7 +540,7 @@ window.fetchAnalyticsData = function() {
             });
             processDriverAnalytics();
         });
-    } catch(err) { console.error("Analytics fetch error"); }
+    } catch(err) {}
 }
 
 function processDriverAnalytics() {
@@ -619,9 +551,6 @@ function processDriverAnalytics() {
         if (window.unsubAnalyticsExpenses) window.unsubAnalyticsExpenses();
 
         window.unsubAnalyticsExpenses = onSnapshot(q, (snapshot) => {
-            const isEn = document.documentElement.lang === 'en'; 
-            const currency = isEn ? 'SAR' : 'ريال'; 
-
             let allExpenses = [];
             snapshot.forEach(doc => allExpenses.push(doc.data()));
 
@@ -643,7 +572,7 @@ function processDriverAnalytics() {
             activeDriverExp.forEach(exp => {
                 let amt = Number(exp.amount) || 0;
                 let cb = Number(exp.cashback) || 0;
-                let shop = exp.shopName || (isEn ? 'Unknown' : 'غير معروف');
+                let shop = exp.shopName || 'غير معروف';
 
                 totalAmt += amt;
                 totalCb += cb;
@@ -652,8 +581,8 @@ function processDriverAnalytics() {
 
             const elAmt = document.getElementById('stat-total-amt');
             if(elAmt) {
-                elAmt.textContent = totalAmt + ' ' + currency; 
-                document.getElementById('stat-total-cb').textContent = totalCb + ' ' + currency; 
+                elAmt.textContent = totalAmt + ' ريال';
+                document.getElementById('stat-total-cb').textContent = totalCb + ' ريال';
             }
 
             let sortedShops = Object.keys(shopTotals).sort((a,b) => shopTotals[b] - shopTotals[a]);
@@ -675,9 +604,9 @@ function processDriverAnalytics() {
                 if (activeTimeRange === '3m' || activeTimeRange === '6m') {
                     let d = new Date(date);
                     d.setDate(d.getDate() - d.getDay()); 
-                    groupKey = d.toISOString().split('T')[0] + (isEn ? ' (Week)' : ' (أسبوع)');
+                    groupKey = d.toISOString().split('T')[0] + ' (أسبوع)';
                 } else if (activeTimeRange === '1y' || activeTimeRange === 'all') {
-                    groupKey = date.substring(0, 7) + (isEn ? ' (Month)' : ' (شهر)'); 
+                    groupKey = date.substring(0, 7) + ' (شهر)'; 
                 }
 
                 allTimeKeys.add(groupKey);
@@ -721,7 +650,7 @@ function processDriverAnalytics() {
                 data: {
                     labels: top10Shops,
                     datasets: [{
-                        label: isEn ? 'Amount (SAR)' : 'المبلغ (ريال)',
+                        label: 'المبلغ (ريال)',
                         data: top10Amounts,
                         backgroundColor: 'rgba(59, 130, 246, 0.8)',
                         borderRadius: 6 
@@ -761,7 +690,7 @@ function processDriverAnalytics() {
                                     let label = context.label || '';
                                     let value = context.parsed || 0;
                                     let percentage = totalAmt > 0 ? ((value / totalAmt) * 100).toFixed(1) : 0;
-                                    return ` ${label}: ${value} ${currency} (${percentage}%)`; 
+                                    return ` ${label}: ${value} ريال (${percentage}%)`;
                                 }
                             }
                         }
@@ -780,7 +709,9 @@ function processDriverAnalytics() {
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { position: 'top' } },
+                    plugins: {
+                        legend: { position: 'top' } 
+                    },
                     scales: {
                         y: { beginAtZero: true, grid: { color: gridColor } },
                         x: { grid: { display: false } }
@@ -789,17 +720,16 @@ function processDriverAnalytics() {
             });
 
         });
-    } catch (err) { console.error("Chart generation error"); }
+    } catch (err) {}
 }
 
 // ==========================================
-// 9. GLOBAL EVENT LISTENERS (Forms & Clicks)
+// 8. معالجة الأحداث والنماذج
 // ==========================================
 document.addEventListener('change', (e) => {
-    // Dynamic 'Other' card input handler
     if (e.target && e.target.id === 'driver-card') {
         const otherInput = document.getElementById('driver-card-other');
-        if (e.target.value === 'أخرى' || e.target.value === 'Other (Type)') {
+        if (e.target.value === 'أخرى') {
             otherInput.style.display = 'block';
             otherInput.required = true;
         } else {
@@ -811,52 +741,46 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', async (e) => {
-    // Handle Driver Addition & Editing
     if (e.target && e.target.id === 'add-driver-form') {
         e.preventDefault();
         const name = document.getElementById('driver-name').value.trim();
         const car = document.getElementById('driver-car').value.trim();
         const editId = document.getElementById('edit-driver-id').value;
         let card = document.getElementById('driver-card').value;
-        if (card === 'أخرى' || card === 'Other (Type)') card = document.getElementById('driver-card-other').value.trim();
+        if (card === 'أخرى') card = document.getElementById('driver-card-other').value.trim();
         if (!name) return;
 
-        const isEn = document.documentElement.lang === 'en';
         const submitBtn = document.getElementById('submit-driver-btn');
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
-        try {
+    try {
             if (editId) {
-                // Update Existing Driver
                 await updateDoc(doc(db, "drivers", editId), { name: name, car: car || "", cardType: card || "" });
-                document.getElementById('form-title').textContent = isEn ? "Add New Driver" : "إضافة سائق جديد";
+                document.getElementById('form-title').textContent = "إضافة سائق جديد";
                 document.getElementById('cancel-edit-btn').style.display = 'none';
-                submitBtn.innerHTML = isEn ? 'Updated ✔' : 'تم التحديث ✔';
+                submitBtn.innerHTML = 'تم التحديث ✔';
                 submitBtn.style.background = '#2ecc71';
                 submitBtn.style.borderColor = '#2ecc71';
             } else {
-                // Add New Driver
                 await addDoc(collection(db, "drivers"), { userId: currentUser.uid, name: name, car: car || "", cardType: card || "", createdAt: serverTimestamp() });
-                submitBtn.innerHTML = isEn ? 'Added ✔' : 'تمت الإضافة ✔';
+                submitBtn.innerHTML = 'تمت الإضافة ✔';
                 submitBtn.style.background = '#2ecc71';
                 submitBtn.style.borderColor = '#2ecc71';
             }
             
-            // Reset form after submission
             e.target.reset();
             document.getElementById('edit-driver-id').value = "";
             
-            // Revert button state
+            // إرجاع الزر لشكله ولونه الطبيعي بعد ثانيتين
             setTimeout(() => {
-                submitBtn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span>${isEn ? 'Save' : 'حفظ'}</span>`;
+                submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> حفظ';
                 submitBtn.style.background = '';
                 submitBtn.style.borderColor = '';
             }, 2000);
             
         } catch (error) { 
-            // Handle error UI state
-            submitBtn.innerHTML = 'Error ❌';
+            submitBtn.innerHTML = 'حدث خطأ ❌';
             submitBtn.style.background = 'var(--danger)';
             submitBtn.style.borderColor = 'var(--danger)';
             setTimeout(() => {
@@ -867,99 +791,47 @@ document.addEventListener('submit', async (e) => {
         }
     }
     
-// Handle Settings Update (Name, Email, Password)
     if (e.target && e.target.id === 'settings-form') {
         e.preventDefault();
         const newName = document.getElementById('settings-name-input').value.trim();
-        const newEmail = document.getElementById('settings-email-input').value.trim(); 
+        const newEmail = document.getElementById('settings-email-input').value.trim();
         const newPassword = document.getElementById('settings-password-input').value; 
         
         if (!newName || !newEmail) return;
-        const saveBtn = document.getElementById('save-settings-btn');
-        const originalText = saveBtn.innerHTML;
-        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-        const isEn = document.documentElement.lang === 'en';
+        const currentEmail = currentUser && currentUser.email ? currentUser.email : '';
         
-        try {
-            if (auth.currentUser) {
-                let verificationSent = false;
-
-                // 1. Update Display Name
-                if (auth.currentUser.displayName !== newName) {
+        if (newEmail !== currentEmail && currentEmail !== '') {
+            document.getElementById('settings-form').style.display = 'none';
+            document.getElementById('otp-verification-section').style.display = 'block';
+            const section = document.getElementById('otp-verification-section');
+            section.dataset.newName = newName;
+            section.dataset.newEmail = newEmail;
+            section.dataset.newPassword = newPassword; 
+        } else {
+            const saveBtn = document.getElementById('save-settings-btn');
+            const originalText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            
+            try {
+                if (auth.currentUser) {
                     await updateProfile(auth.currentUser, { displayName: newName });
+                    if (newPassword) await updatePassword(auth.currentUser, newPassword);
                 }
-                
-                // 2. Update Password
-                if (newPassword) {
-                    await updatePassword(auth.currentUser, newPassword);
-                }
-
-                // 3. Securely Update Email (Sends verification to the new email first)
-                if (auth.currentUser.email !== newEmail) {
-                    await verifyBeforeUpdateEmail(auth.currentUser, newEmail);
-                    verificationSent = true;
-                }
-                
                 document.getElementById('user-name').textContent = newName;
-                document.getElementById('settings-password-input').value = ''; 
-                
-                if (verificationSent) {
-                    saveBtn.innerHTML = isEn ? 'Verification Sent! Check Email ✔' : 'تم إرسال رابط التوثيق للإيميل ✔';
-                } else {
-                    saveBtn.innerHTML = isEn ? 'Saved ✔' : 'تم الحفظ ✔';
-                }
-                
+                saveBtn.innerHTML = 'تم الحفظ ✔';
                 saveBtn.style.background = '#2ecc71';
-                setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 4000);
+                document.getElementById('settings-password-input').value = ''; 
+                setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
+            } catch (error) {
+                Swal.fire({icon: 'error', title: 'تحذير أمني', text: 'لتغيير الرقم السري، يرجى تسجيل الخروج والدخول مجدداً لتأكيد هويتك.'});
+                saveBtn.innerHTML = originalText;
             }
-            
-        } catch (error) {
-            // Handle Firebase Auth errors inline
-            saveBtn.style.background = 'var(--danger)';
-            saveBtn.style.borderColor = 'var(--danger)';
-            
-            if (error.code === 'auth/requires-recent-login') {
-                saveBtn.innerHTML = isEn ? 'Relogin Required!' : 'سجل خروج وادخل مجدداً لدواعي أمنية!';
-            } else if (error.code === 'auth/email-already-in-use') {
-                saveBtn.innerHTML = isEn ? 'Email Taken!' : 'الإيميل مسجل مسبقاً!';
-            } else if (error.code === 'auth/invalid-email') {
-                saveBtn.innerHTML = isEn ? 'Invalid Email!' : 'صيغة الإيميل خاطئة!';
-            } else if (error.code === 'auth/weak-password') {
-                saveBtn.innerHTML = isEn ? 'Weak Password!' : 'كلمة المرور ضعيفة!';
-            } else {
-                saveBtn.innerHTML = isEn ? 'Error ❌' : 'حدث خطأ ❌';
-            }
-            
-            // Revert button state
-            setTimeout(() => { 
-                saveBtn.innerHTML = originalText; 
-                saveBtn.style.background = ''; 
-                saveBtn.style.borderColor = ''; 
-            }, 4000);
         }
     }
 });
 
 document.addEventListener('click', async (e) => {
-    const isEn = document.documentElement.lang === 'en';
-    // Toggle Login/Signup Forms (Fix for dynamic translation)
-    if (e.target && e.target.id === 'show-signup') {
-        const loginBox = document.getElementById('login-form-container');
-        const signupBox = document.getElementById('signup-form-container');
-        if(loginBox) loginBox.style.display = 'none';
-        if(signupBox) signupBox.style.display = 'block';
-        return;
-    }
-    
-    if (e.target && e.target.id === 'show-login') {
-        const loginBox = document.getElementById('login-form-container');
-        const signupBox = document.getElementById('signup-form-container');
-        if(signupBox) signupBox.style.display = 'none';
-        if(loginBox) loginBox.style.display = 'block';
-        return;
-    }
-
-    // Expense Inline Edit Button Handler
+    // === زر التعديل في جدول العمليات (يحول النص لمربع إدخال) ===
     const editExpBtn = e.target.closest('.edit-expense-btn');
     if (editExpBtn) {
         const id = editExpBtn.getAttribute('data-id');
@@ -971,32 +843,34 @@ document.addEventListener('click', async (e) => {
         const amount = row.querySelector('.col-amount').getAttribute('data-val');
         const cashback = row.querySelector('.col-cashback').getAttribute('data-val');
 
+        // ستايل موحد لمربعات الإدخال
         const inputStyle = "width: 100%; min-width: 80px; padding: 6px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-base); color: var(--text-primary); outline: none; font-family: inherit;";
 
         row.querySelector('.col-shop').innerHTML = `<input type="text" class="edit-in-shop" value="${shop}" style="${inputStyle}">`;
-        row.querySelector('.col-date').innerHTML = `<input type="date" class="edit-in-date" value="${date}" lang="en" style="${inputStyle}">`;
+        row.querySelector('.col-date').innerHTML = `<input type="date" class="edit-in-date" value="${date}" style="${inputStyle}">`;
         row.querySelector('.col-amount').innerHTML = `<input type="number" class="edit-in-amount" value="${amount}" style="${inputStyle}">`;
         row.querySelector('.col-cashback').innerHTML = `<input type="number" class="edit-in-cashback" value="${cashback}" style="${inputStyle}">`;
         
         row.querySelector('.col-actions').innerHTML = `
-            <button class="btn-text save-expense-btn" data-id="${id}" style="color: white; font-size: 13px; background: #2ecc71; padding: 6px 12px; border-radius: 6px; margin-left: 5px; font-weight: bold;">${isEn ? 'Save' : 'حفظ'}</button>
-            <button class="btn-text cancel-expense-btn" style="color: var(--text-primary); font-size: 13px; background: rgba(130,130,130,0.2); padding: 6px 12px; border-radius: 6px; font-weight: bold;">${isEn ? 'Cancel' : 'إلغاء'}</button>
+            <button class="btn-text save-expense-btn" data-id="${id}" style="color: white; font-size: 13px; background: #2ecc71; padding: 6px 12px; border-radius: 6px; margin-left: 5px; font-weight: bold;">حفظ</button>
+            <button class="btn-text cancel-expense-btn" style="color: var(--text-primary); font-size: 13px; background: rgba(130,130,130,0.2); padding: 6px 12px; border-radius: 6px; font-weight: bold;">إلغاء</button>
         `;
         return;
     }
 
-    // Expense Edit Cancel Handler
+    // === زر إلغاء تعديل العملية ===
     if (e.target.closest('.cancel-expense-btn')) {
-        fetchUserExpenses(activeDriverId); 
+        fetchUserExpenses(activeDriverId); // إعادة جلب البيانات تلغي التعديل بسهولة
         return;
     }
 
-    // Expense Update Handler (Firestore)
+    // === زر حفظ تعديل العملية ===
     const saveExpBtn = e.target.closest('.save-expense-btn');
     if (saveExpBtn) {
         const id = saveExpBtn.getAttribute('data-id');
         const row = document.getElementById(`exp-row-${id}`);
         if (!row) return;
+
         saveExpBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
         const newShop = row.querySelector('.edit-in-shop').value.trim();
@@ -1005,42 +879,66 @@ document.addEventListener('click', async (e) => {
         const newCashback = parseFloat(row.querySelector('.edit-in-cashback').value) || 0;
 
         try {
-            await updateDoc(doc(db, "expenses", id), { shopName: newShop, date: newDate, amount: newAmount, cashback: newCashback });
+            await updateDoc(doc(db, "expenses", id), {
+                shopName: newShop,
+                date: newDate,
+                amount: newAmount,
+                cashback: newCashback
+            });
+            // قاعدة البيانات (onSnapshot) بتحدث الجدول تلقائياً بشكل أنيق
         } catch (err) {
-            saveExpBtn.innerHTML = 'Error!';
+            saveExpBtn.innerHTML = 'خطأ!';
             saveExpBtn.style.background = 'var(--danger)';
             setTimeout(() => fetchUserExpenses(activeDriverId), 2000);
         }
         return;
     }
-
-    // Export PDF Handler (html2pdf integration)
+// ==========================================
+    // 1. زر إنشاء تقرير PDF (احترافي، ألوان واضحة، وصياغة مالية)
+    // ==========================================
     if (e.target.closest('#export-pdf-btn')) {
         const btn = e.target.closest('#export-pdf-btn');
         const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + (isEn ? 'Exporting...' : 'جاري إصدار التقرير...');
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري إصدار التقرير...';
         
         const totalAmt = document.getElementById('stat-total-amt').innerText;
         const totalCb = document.getElementById('stat-total-cb').innerText;
-        const currentDate = new Date().toLocaleDateString('en-GB');
+        const currentDate = new Date().toLocaleDateString('ar-SA');
+        const isEnglish = document.documentElement.lang === 'en';
 
-        // Save original chart colors
+        // 1. حفظ ألوان الشارت الأصلية (عشان نرجعها بعدين)
         const originalColor = Chart.defaults.color;
         
-        // Force dark text for PDF readability
+        // 2. إجبار الشارت على اللون الأسود الداكن عشان يوضح في الـ PDF
         Chart.defaults.color = '#1e293b';
-        if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = '#1e293b'; barChartInstance.options.scales.y.ticks.color = '#1e293b'; barChartInstance.update(); }
-        if (pieChartInstance) { pieChartInstance.options.plugins.legend.display = true; pieChartInstance.options.plugins.legend.position = 'bottom'; pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; pieChartInstance.update(); }
-        if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = '#1e293b'; lineChartInstance.options.scales.y.ticks.color = '#1e293b'; lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; lineChartInstance.update(); }
+        if (barChartInstance) { 
+            barChartInstance.options.scales.x.ticks.color = '#1e293b'; 
+            barChartInstance.options.scales.y.ticks.color = '#1e293b'; 
+            barChartInstance.update(); 
+        }
+        if (pieChartInstance) { 
+            pieChartInstance.options.plugins.legend.display = true; // إظهار الأسماء المفقودة
+            pieChartInstance.options.plugins.legend.position = 'bottom';
+            pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; 
+            pieChartInstance.update(); 
+        }
+        if (lineChartInstance) { 
+            lineChartInstance.options.scales.x.ticks.color = '#1e293b'; 
+            lineChartInstance.options.scales.y.ticks.color = '#1e293b'; 
+            lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; 
+            lineChartInstance.update(); 
+        }
 
+        // نعطي الشارت نص ثانية عشان يتحدث لونه للأسود، ثم نصوره
         setTimeout(() => {
+            // دالة سرية تصور الشارت بخلفية بيضاء إجبارية عشان ما تطلع الأرقام شفافة
             const getChartImage = (chart) => {
                 if (!chart) return '';
                 const canvas = chart.canvas;
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
                 const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.fillStyle = '#ffffff'; 
+                tempCtx.fillStyle = '#ffffff'; // خلفية بيضاء
                 tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
                 tempCtx.drawImage(canvas, 0, 0);
                 return tempCanvas.toDataURL('image/jpeg', 1.0);
@@ -1050,7 +948,7 @@ document.addEventListener('click', async (e) => {
             const pieImg = getChartImage(pieChartInstance);
             const lineImg = getChartImage(lineChartInstance);
 
-            // Revert chart colors back to UI theme
+            // 3. إرجاع الألوان للوضع الليلي في الموقع بعد التصوير
             Chart.defaults.color = originalColor;
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             const restoreColor = isDark ? '#e2e8f0' : '#1e293b';
@@ -1058,35 +956,37 @@ document.addEventListener('click', async (e) => {
             if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = restoreColor; pieChartInstance.update(); }
             if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = restoreColor; lineChartInstance.options.scales.y.ticks.color = restoreColor; lineChartInstance.options.plugins.legend.labels.color = restoreColor; lineChartInstance.update(); }
 
-            // Build PDF HTML Template
-            const titleStr = isEn ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
-            const dateStr = isEn ? 'Date:' : 'تاريخ التقرير:';
-            const totalExpStr = isEn ? 'Total Expenses' : 'إجمالي المصروفات';
-            const totalCbStr = isEn ? 'Total Cashback' : 'الاسترداد النقدي (Cashback)';
-            const top10Str = isEn ? 'Highest Spending Categories' : 'أعلى المتاجر صرفاً';
-            const distStr = isEn ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
-            const lineStr = isEn ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
+            // 4. صياغة مالية احترافية بدون خرابيط الـ AI
+            const titleStr = isEnglish ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
+            const dateStr = isEnglish ? 'Date:' : 'تاريخ التقرير:';
+            const totalExpStr = isEnglish ? 'Total Expenses' : 'إجمالي المصروفات';
+            const totalCbStr = isEnglish ? 'Total Cashback' : 'الاسترداد النقدي (Cashback)';
+            const top10Str = isEnglish ? 'Highest Spending Categories' : 'أعلى المتاجر صرفاً';
+            const distStr = isEnglish ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
+            const lineStr = isEnglish ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
 
             const pdfTemplate = document.createElement('div');
             pdfTemplate.innerHTML = `
-                <div style="font-family: Arial, sans-serif; width: 100%; direction: ${isEn ? 'ltr' : 'rtl'}; background: #ffffff; color: #000000;">
+                <div style="font-family: Arial, sans-serif; width: 100%; direction: ${isEnglish ? 'ltr' : 'rtl'}; background: #ffffff; color: #000000;">
+                    
+                    <!-- الصفحة الأولى -->
                     <div style="padding: 40px; page-break-after: always;">
                         <div style="border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-end;">
                             <div>
                                 <h1 style="color: #1e3a8a; margin: 0; font-size: 28px; font-weight: bold;">${titleStr}</h1>
-                                <p style="margin: 5px 0 0 0; font-size: 14px; color: #475569;">${isEn ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
+                                <p style="margin: 5px 0 0 0; font-size: 14px; color: #475569;">${isEnglish ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
                             </div>
-                            <div style="text-align: ${isEn ? 'right' : 'left'};">
+                            <div style="text-align: ${isEnglish ? 'right' : 'left'};">
                                 <p style="margin: 0; font-size: 14px; color: #000000; font-weight: bold;">${dateStr} ${currentDate}</p>
                             </div>
                         </div>
 
                         <div style="display: flex; justify-content: space-between; margin-bottom: 40px; gap: 20px;">
-                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEn ? '0' : '5px solid #e74c3c'}; border-left: ${isEn ? '5px solid #e74c3c' : '0'}; text-align: center;">
+                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEnglish ? '0' : '5px solid #e74c3c'}; border-left: ${isEnglish ? '5px solid #e74c3c' : '0'}; text-align: center;">
                                 <h3 style="margin: 0 0 10px 0; color: #334155; font-size: 18px;">${totalExpStr}</h3>
                                 <div style="font-size: 28px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
                             </div>
-                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEn ? '0' : '5px solid #2ecc71'}; border-left: ${isEn ? '5px solid #2ecc71' : '0'}; text-align: center;">
+                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEnglish ? '0' : '5px solid #2ecc71'}; border-left: ${isEnglish ? '5px solid #2ecc71' : '0'}; text-align: center;">
                                 <h3 style="margin: 0 0 10px 0; color: #334155; font-size: 18px;">${totalCbStr}</h3>
                                 <div style="font-size: 28px; font-weight: bold; color: #15803d;">${totalCb}</div>
                             </div>
@@ -1098,6 +998,7 @@ document.addEventListener('click', async (e) => {
                         </div>
                     </div>
                     
+                    <!-- الصفحة الثانية -->
                     <div style="padding: 40px; page-break-after: always;">
                         <div style="text-align: center;">
                             <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${distStr}</h2>
@@ -1105,6 +1006,7 @@ document.addEventListener('click', async (e) => {
                         </div>
                     </div>
 
+                    <!-- الصفحة الثالثة -->
                     <div style="padding: 40px;">
                         <div style="text-align: center;">
                             <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${lineStr}</h2>
@@ -1116,11 +1018,16 @@ document.addEventListener('click', async (e) => {
 
             const opt = {
                 margin:       [10, 0, 15, 0],
-                filename:     isEn ? 'Financial_Report.pdf' : 'تقرير_المصروفات.pdf',
+                filename:     isEnglish ? 'Financial_Report.pdf' : 'تقرير_المصاريف.pdf',
                 image:        { type: 'jpeg', quality: 1 },
-                html2canvas:  { scale: 2, useCORS: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+                html2canvas:  { 
+                scale: 2, 
+                useCORS: true,
+                windowWidth: 1024 // هذا السطر اللي بيوهم الجوال إنه شاشة كمبيوتر عريضة
+                },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } // وهذا السطر اللي بيمنع قص الرسومات بالنص
+                };
 
             html2pdf().set(opt).from(pdfTemplate).toPdf().get('pdf').then(function (pdf) {
                 const totalPages = pdf.internal.getNumberOfPages();
@@ -1135,51 +1042,56 @@ document.addEventListener('click', async (e) => {
             }).save().then(() => {
                 btn.innerHTML = originalText;
             }).catch(err => {
+                console.error(err);
                 btn.innerHTML = originalText;
             });
         }, 500);
         return;
     }
 
-    // Language Toggle Handler
+// ==========================================
+    // 2. زر تغيير اللغة (English / العربية)
+    // ==========================================
     const langBtn = e.target.closest('#lang-toggle');
     if (langBtn) {
         const currentLang = document.documentElement.lang;
         const isAr = currentLang === 'ar';
-        const newLang = isAr ? 'en' : 'ar';
-
-        if (typeof currentUser !== 'undefined' && currentUser) {
-            updateDoc(doc(db, "users", currentUser.uid), { lang: newLang }).catch(err => console.log(err));
-        }
 
         if (isAr) {
             document.documentElement.lang = 'en'; 
             document.documentElement.dir = 'ltr'; 
             langBtn.textContent = 'ع'; 
             localStorage.setItem('site_lang', 'en');
-            // Call static translation manager
-            if (typeof translateStaticHTML === 'function') translateStaticHTML(true); 
+            
+            document.querySelectorAll('.nav-item').forEach(el => {
+                if(el.innerHTML.includes('العمليات')) el.innerHTML = '<i class="fa-solid fa-receipt"></i> Operations';
+                if(el.innerHTML.includes('التحليلات')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> Analytics';
+                if(el.innerHTML.includes('السائقين')) el.innerHTML = '<i class="fa-solid fa-users"></i> Drivers';
+            });
+            document.getElementById('logout-btn').textContent = 'Logout';
         } else {
             document.documentElement.lang = 'ar'; 
             document.documentElement.dir = 'rtl'; 
             langBtn.textContent = 'EN'; 
             localStorage.setItem('site_lang', 'ar');
-            // Call static translation manager
-            if (typeof translateStaticHTML === 'function') translateStaticHTML(false); 
+            
+            document.querySelectorAll('.nav-item').forEach(el => {
+                if(el.innerHTML.includes('Operations')) el.innerHTML = '<i class="fa-solid fa-receipt"></i> العمليات';
+                if(el.innerHTML.includes('Analytics')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> التحليلات';
+                if(el.innerHTML.includes('Drivers')) el.innerHTML = '<i class="fa-solid fa-users"></i> السائقين';
+            });
+            document.getElementById('logout-btn').textContent = 'تسجيل خروج';
         }
         
-        // Refresh active tab to translate dynamic content
-        const activeNav = document.querySelector('.nav-item.active');
-        if (activeNav) {
-            const target = activeNav.getAttribute('data-target');
-            if(target === 'manage') { document.querySelector('[data-target="manage"]').click(); }
-            else if(target === 'analytics') { document.querySelector('[data-target="analytics"]').click(); }
-            else if(target === 'drivers') { document.querySelector('[data-target="drivers"]').click(); }
-        }
+        const activeNav = document.querySelector('.nav-item.active').getAttribute('data-target');
+        if(activeNav === 'manage') { document.querySelector('[data-target="manage"]').click(); }
+        else if(activeNav === 'analytics') { document.querySelector('[data-target="analytics"]').click(); }
+        else if(activeNav === 'drivers') { document.querySelector('[data-target="drivers"]').click(); }
+        
         return;
     }
 
-    // Analytics Driver Tab Selection
+    // 3. التنقل بالتحليلات
     const analyticsTabBtn = e.target.closest('.analytics-driver-tab-btn');
     if (analyticsTabBtn) {
         activeAnalyticsDriverId = analyticsTabBtn.getAttribute('data-id');
@@ -1187,7 +1099,6 @@ document.addEventListener('click', async (e) => {
         return;
     }
 
-    // Analytics Time Range Filters
     const timeFilterBtn = e.target.closest('.time-filter-btn');
     if (timeFilterBtn) {
         document.querySelectorAll('.time-filter-btn').forEach(btn => {
@@ -1203,7 +1114,7 @@ document.addEventListener('click', async (e) => {
         return;
     }
 
-    // Operations Driver Tab Selection
+    // 4. السائقين والعمليات 
     const tabBtn = e.target.closest('.dashboard-tab-btn');
     if (tabBtn) {
         activeDriverId = tabBtn.getAttribute('data-id');
@@ -1221,7 +1132,7 @@ document.addEventListener('click', async (e) => {
         const cardSelect = document.getElementById('driver-card');
         const cardOther = document.getElementById('driver-card-other');
         
-        if (["مدى", "فيزا", "ماستركارد", "", "Mada", "Visa", "Mastercard"].includes(card)) {
+        if (["مدى", "فيزا", "ماستركارد", ""].includes(card)) {
             cardSelect.value = card;
             cardOther.style.display = 'none';
         } else {
@@ -1230,9 +1141,8 @@ document.addEventListener('click', async (e) => {
             cardOther.value = card;
         }
 
-        const isEn = document.documentElement.lang === 'en';
-        document.getElementById('form-title').textContent = isEn ? "Edit Driver" : "تعديل بيانات السائق";
-        document.getElementById('submit-driver-btn').innerHTML = `<i class="fa-solid fa-pen-to-square"></i> <span>${isEn ? 'Update' : 'تحديث'}</span>`;
+        document.getElementById('form-title').textContent = "تعديل بيانات السائق";
+        document.getElementById('submit-driver-btn').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> تحديث';
         document.getElementById('cancel-edit-btn').style.display = 'inline-block';
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
@@ -1240,25 +1150,22 @@ document.addEventListener('click', async (e) => {
 
     const cancelEditBtn = e.target.closest('#cancel-edit-btn');
     if (cancelEditBtn) {
-        const isEn = document.documentElement.lang === 'en';
         document.getElementById('add-driver-form').reset();
         document.getElementById('driver-card-other').style.display = 'none';
         document.getElementById('edit-driver-id').value = "";
-        document.getElementById('form-title').textContent = isEn ? "Add New Driver" : "إضافة سائق جديد";
-        document.getElementById('submit-driver-btn').innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span>${isEn ? 'Save' : 'حفظ'}</span>`;
+        document.getElementById('form-title').textContent = "إضافة سائق جديد";
+        document.getElementById('submit-driver-btn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> حفظ';
         cancelEditBtn.style.display = 'none';
         return;
     }
 
-    // Inline Deletion Handler (Double Click Confirmation)
+    // 5. الحذف (مع Try Catch)
     const deleteBtn = e.target.closest('.delete-btn');
     if (deleteBtn) {
         const id = deleteBtn.getAttribute('data-id');
-        const isEn = document.documentElement.lang === 'en';
         if (!deleteBtn.classList.contains('confirming-delete')) {
-            // Confirmation UI State
             const originalHtml = deleteBtn.innerHTML;
-            deleteBtn.innerHTML = isEn ? 'Sure?' : 'متأكد؟';
+            deleteBtn.innerHTML = 'متأكد؟';
             deleteBtn.style.color = 'white'; deleteBtn.style.background = 'var(--danger)';
             deleteBtn.style.padding = '4px 8px'; deleteBtn.style.borderRadius = '4px';
             deleteBtn.classList.add('confirming-delete');
@@ -1270,26 +1177,19 @@ document.addEventListener('click', async (e) => {
                 }
             }, 3000);
         } else {
-            // Execute Firestore Deletion
             deleteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             try { await deleteDoc(doc(db, "expenses", id)); } 
-            catch (err) { 
-                deleteBtn.innerHTML = 'Error'; 
-                setTimeout(() => { deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>'; deleteBtn.classList.remove('confirming-delete'); }, 2000);
-            }
+            catch (err) { Swal.fire({icon: 'error', title: 'خطأ', text: 'لم يتم الحذف.'}); }
         }
         return;
     }
 
-    // Inline Deletion Handler (Double Click Confirmation)
     const deleteDriverBtn = e.target.closest('.delete-driver-btn');
     if (deleteDriverBtn) {
         const id = deleteDriverBtn.getAttribute('data-id');
-        const isEn = document.documentElement.lang === 'en';
         if (!deleteDriverBtn.classList.contains('confirming-delete')) {
-            // Confirmation UI State
             const originalHtml = deleteDriverBtn.innerHTML;
-            deleteDriverBtn.innerHTML = isEn ? 'Sure?' : 'متأكد؟';
+            deleteDriverBtn.innerHTML = 'متأكد؟';
             deleteDriverBtn.style.background = 'var(--danger)'; deleteDriverBtn.style.color = 'white';
             deleteDriverBtn.classList.add('confirming-delete');
             setTimeout(() => {
@@ -1300,13 +1200,9 @@ document.addEventListener('click', async (e) => {
                 }
             }, 3000);
         } else {
-            // Execute Firestore Deletion
             deleteDriverBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             try { await deleteDoc(doc(db, "drivers", id)); } 
-            catch (err) { 
-                deleteDriverBtn.innerHTML = 'Error'; 
-                setTimeout(() => { deleteDriverBtn.innerHTML = '<i class="fa-solid fa-trash"></i>'; deleteDriverBtn.classList.remove('confirming-delete'); }, 2000);
-            }
+            catch (err) { Swal.fire({icon: 'error', title: 'خطأ', text: 'لم يتم الحذف.'}); }
         }
         return;
     }
