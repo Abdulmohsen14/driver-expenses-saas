@@ -1071,18 +1071,22 @@ document.addEventListener('click', async (e) => {
             if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') throw new Error('REPORT_LIB_MISSING');
             if (typeof Chart === 'undefined') throw new Error('CHART_LIB_MISSING');
 
-            const totalAmt = document.getElementById('stat-total-amt').innerText;
-            const totalCb = document.getElementById('stat-total-cb').innerText;
+            const totalAmt = (document.getElementById('stat-total-amt') || {}).textContent || '0';
+            const totalCb = (document.getElementById('stat-total-cb') || {}).textContent || '0';
             const currentDate = new Date().toLocaleDateString(isEng ? 'en-US' : 'ar-SA');
 
+            // تحويل ألوان الرسوم لألوان داكنة واضحة على الخلفية البيضاء أثناء التصوير
+            const curDark = document.documentElement.getAttribute('data-theme') === 'dark';
             const originalColor = Chart.defaults.color;
-            Chart.defaults.color = '#1e293b';
-            if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = '#1e293b'; barChartInstance.options.scales.y.ticks.color = '#1e293b'; barChartInstance.update(); }
-            if (pieChartInstance) { pieChartInstance.options.plugins.legend.display = true; pieChartInstance.options.plugins.legend.position = 'bottom'; pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; pieChartInstance.update(); }
-            if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = '#1e293b'; lineChartInstance.options.scales.y.ticks.color = '#1e293b'; lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; lineChartInstance.update(); }
+            const exportGrid = 'rgba(0,0,0,0.08)';
+            const exportTick = '#1e293b';
+            Chart.defaults.color = exportTick;
+            if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = exportTick; barChartInstance.options.scales.y.ticks.color = exportTick; barChartInstance.options.scales.y.grid.color = exportGrid; barChartInstance.options.scales.x.grid.color = exportGrid; barChartInstance.update(); }
+            if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = exportTick; pieChartInstance.options.plugins.legend.display = true; pieChartInstance.options.plugins.legend.position = 'bottom'; pieChartInstance.update(); }
+            if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = exportTick; lineChartInstance.options.scales.y.ticks.color = exportTick; lineChartInstance.options.scales.x.grid.color = exportGrid; lineChartInstance.options.scales.y.grid.color = exportGrid; lineChartInstance.options.plugins.legend.labels.color = exportTick; lineChartInstance.update(); }
 
             setTimeout(async () => {
-                let pdfTemplate = null;
+                let tempPages = [];
                 try {
                     const getChartImage = (chart) => {
                         if (!chart) return '';
@@ -1100,12 +1104,13 @@ document.addEventListener('click', async (e) => {
                     const pieImg = getChartImage(pieChartInstance);
                     const lineImg = getChartImage(lineChartInstance);
 
+                    // استعادة ألوان الرسوم للوضع الأصلي على الشاشة
                     Chart.defaults.color = originalColor;
-                    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-                    const restoreColor = isDark ? '#e2e8f0' : '#1e293b';
-                    if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = restoreColor; barChartInstance.options.scales.y.ticks.color = restoreColor; barChartInstance.update(); }
-                    if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = restoreColor; pieChartInstance.update(); }
-                    if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = restoreColor; lineChartInstance.options.scales.y.ticks.color = restoreColor; lineChartInstance.options.plugins.legend.labels.color = restoreColor; lineChartInstance.update(); }
+                    const screenTick = curDark ? '#e2e8f0' : '#1e293b';
+                    const screenGrid = curDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+                    if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = screenTick; barChartInstance.options.scales.y.ticks.color = screenTick; barChartInstance.options.scales.x.grid.color = screenGrid; barChartInstance.options.scales.y.grid.color = screenGrid; barChartInstance.update(); }
+                    if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = screenTick; pieChartInstance.update(); }
+                    if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = screenTick; lineChartInstance.options.scales.y.ticks.color = screenTick; lineChartInstance.options.scales.x.grid.color = screenGrid; lineChartInstance.options.scales.y.grid.color = screenGrid; lineChartInstance.options.plugins.legend.labels.color = screenTick; lineChartInstance.update(); }
 
                     const titleStr = isEng ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
                     const dateStr = isEng ? 'Date:' : 'تاريخ التقرير:';
@@ -1115,89 +1120,80 @@ document.addEventListener('click', async (e) => {
                     const distStr = isEng ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
                     const lineStr = isEng ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
 
-                    pdfTemplate = document.createElement('div');
-                    pdfTemplate.style.cssText = "width: 800px; background: #ffffff; color: #000000; font-family: Arial, sans-serif; direction: ltr; padding: 30px; position: fixed; left: -10000px; top: 0; z-index: -1; box-sizing: border-box;";
-                    pdfTemplate.setAttribute('dir', 'ltr');
-                    pdfTemplate.innerHTML = `
-                        <div style="page-break-after: always; padding-bottom: 20px;">
-                            <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; margin-bottom: 25px; padding-bottom: 10px;">
-                                <tr>
-                                    ${isEng ? `
-                                    <td style="text-align: left;">
-                                        <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
-                                        <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">Driver Expense Tracking System</p>
-                                    </td>
-                                    <td style="text-align: right; vertical-align: bottom;">
-                                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
-                                    </td>` : `
-                                    <td style="text-align: left; vertical-align: bottom;">
-                                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
-                                    </td>
-                                    <td style="text-align: right;">
-                                        <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
-                                        <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">نظام إدارة مصاريف السائقين</p>
-                                    </td>`}
-                                </tr>
-                            </table>
+                    // كل قسم = صفحة A4 كاملة (لا انقسام)
+                    const makePage = (inner) => {
+                        const d = document.createElement('div');
+                        d.style.cssText = "width: 794px; height: 1123px; padding: 45px; box-sizing: border-box; background: #ffffff; color: #000000; font-family: Arial, sans-serif; direction: ltr; overflow: hidden; position: fixed; left: -10000px; top: 0; z-index: -1;";
+                        d.setAttribute('dir', 'ltr');
+                        d.innerHTML = inner;
+                        return d;
+                    };
 
-                            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 30px;">
-                                <tr>
-                                    <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-right: 5px solid #e74c3c; text-align: center;">
-                                        <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalExpStr}</div>
-                                        <div style="font-size: 24px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
-                                    </td>
-                                    <td style="width: 4%;"></td>
-                                    <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-right: 5px solid #2ecc71; text-align: center;">
-                                        <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalCbStr}</div>
-                                        <div style="font-size: 24px; font-weight: bold; color: #15803d;">${totalCb}</div>
-                                    </td>
-                                </tr>
-                            </table>
+                    const page1 = makePage(`
+                        <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 30px;">
+                            <tr>
+                                <td style="text-align: ${isEng ? 'left' : 'right'};">
+                                    <h1 style="color: #1e3a8a; margin: 0; font-size: 26px; font-weight: bold;">${titleStr}</h1>
+                                    <p style="margin: 6px 0 0 0; font-size: 13px; color: #475569;">${isEng ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
+                                </td>
+                                <td style="text-align: ${isEng ? 'right' : 'left'}; vertical-align: bottom;">
+                                    <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
+                                </td>
+                            </tr>
+                        </table>
 
-                            <div style="text-align: center;">
-                                <h3 style="color: #1e3a8a; margin-bottom: 15px; font-size: 16px;">${top10Str}</h3>
-                                <img src="${barImg}" style="width: 100%; max-height: 320px; object-fit: contain; display: block; margin: 0 auto;">
-                            </div>
+                        <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 32px;">
+                            <tr>
+                                <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-right: 5px solid #e74c3c; text-align: center;">
+                                    <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalExpStr}</div>
+                                    <div style="font-size: 26px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
+                                </td>
+                                <td style="width: 4%;"></td>
+                                <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-right: 5px solid #2ecc71; text-align: center;">
+                                    <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalCbStr}</div>
+                                    <div style="font-size: 26px; font-weight: bold; color: #15803d;">${totalCb}</div>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <div style="text-align: center;">
+                            <h3 style="color: #1e3a8a; margin-bottom: 18px; font-size: 17px;">${top10Str}</h3>
+                            <img src="${barImg}" style="width: 100%; max-height: 420px; object-fit: contain; display: block; margin: 0 auto;">
                         </div>
+                    `);
 
-                        <div style="page-break-after: always; padding-top: 20px; text-align: center;">
-                            <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${distStr}</h3>
-                            <img src="${pieImg}" style="width: 85%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
+                    const page2 = makePage(`
+                        <div style="text-align: center; padding-top: 20px;">
+                            <h3 style="color: #1e3a8a; margin-bottom: 30px; font-size: 17px;">${distStr}</h3>
+                            <img src="${pieImg}" style="width: 80%; max-height: 680px; object-fit: contain; display: block; margin: 0 auto;">
                         </div>
+                    `);
 
-                        <div style="padding-top: 20px; text-align: center;">
-                            <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${lineStr}</h3>
-                            <img src="${lineImg}" style="width: 100%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
+                    const page3 = makePage(`
+                        <div style="text-align: center; padding-top: 20px;">
+                            <h3 style="color: #1e3a8a; margin-bottom: 30px; font-size: 17px;">${lineStr}</h3>
+                            <img src="${lineImg}" style="width: 100%; max-height: 680px; object-fit: contain; display: block; margin: 0 auto;">
                         </div>
-                    `;
-
-                    document.body.appendChild(pdfTemplate);
-                    const canvas = await html2canvas(pdfTemplate, {
-                        scale: 2,
-                        useCORS: true,
-                        backgroundColor: '#ffffff',
-                        logging: false
-                    });
-                    document.body.removeChild(pdfTemplate);
-                    pdfTemplate = null;
+                    `);
 
                     const { jsPDF } = window.jspdf;
                     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                     const pageWidth = pdf.internal.pageSize.getWidth();
                     const pageHeight = pdf.internal.pageSize.getHeight();
-                    const imgData = canvas.toDataURL('image/jpeg', 0.92);
-                    const imgWidth = pageWidth;
-                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-                    let heightLeft = imgHeight;
-                    let position = 0;
-                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-                    heightLeft -= pageHeight;
-                    while (heightLeft > 0) {
-                        position -= pageHeight;
-                        pdf.addPage();
-                        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
-                        heightLeft -= pageHeight;
+                    const targets = [page1, page2, page3];
+                    for (let i = 0; i < targets.length; i++) {
+                        document.body.appendChild(targets[i]);
+                        tempPages.push(targets[i]);
+                        const canvas = await html2canvas(targets[i], { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
+                        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+                        if (i > 0) pdf.addPage();
+                        pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
+                    }
+
+                    while (tempPages.length) {
+                        const p = tempPages.pop();
+                        if (p && p.parentNode) p.parentNode.removeChild(p);
                     }
 
                     const totalPages = pdf.internal.getNumberOfPages();
@@ -1205,18 +1201,21 @@ document.addEventListener('click', async (e) => {
                         pdf.setPage(i);
                         pdf.setFontSize(10);
                         pdf.setTextColor(100);
-                        pdf.text(String(i) + ' / ' + String(totalPages), pageWidth / 2, pageHeight - 8, { align: 'center' });
+                        pdf.text(String(i) + ' / ' + String(totalPages), pageWidth / 2, pageHeight - 7, { align: 'center' });
                     }
 
                     pdf.save(isEng ? 'Financial_Report.pdf' : 'تقرير_المصاريف.pdf');
                     btn.innerHTML = originalText;
                 } catch (err) {
                     console.error(err);
-                    if (pdfTemplate && pdfTemplate.parentNode) pdfTemplate.parentNode.removeChild(pdfTemplate);
+                    while (tempPages.length) {
+                        const p = tempPages.pop();
+                        if (p && p.parentNode) p.parentNode.removeChild(p);
+                    }
                     btn.innerHTML = originalText;
                     Swal.fire({ icon: 'error', title: isEng ? 'PDF Error' : 'خطأ بالتقرير', text: isEng ? 'Could not generate the report. Try again.' : 'حصل خطأ أثناء إنشاء التقرير. حاول مجدداً.' });
                 }
-            }, 600);
+            }, 700);
         } catch (err) {
             console.error(err);
             btn.innerHTML = originalText;
