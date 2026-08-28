@@ -256,7 +256,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, '../')));
-app.get('*', (req, res) => {
+
+// الخطأ كان هنا، وتم إرجاعه للصيغة الصحيحة '/'
+app.get('/', (req, res) => {
     res.sendFile(path.resolve(__dirname, '../index.html'));
 });
 
