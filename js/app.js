@@ -40,12 +40,12 @@ try {
     if (savedLang === 'en') {
         document.documentElement.lang = 'en';
         document.documentElement.dir = 'ltr';
-        window.addEventListener('DOMContentLoaded', () => {
-            const langBtn = document.getElementById('lang-toggle');
-            if (langBtn) langBtn.textContent = 'ع';
-        });
+    } else {
+        document.documentElement.lang = 'ar';
+        document.documentElement.dir = 'rtl';
     }
 } catch(e) {}
+applyLanguage();
 
 function cleanupSubscriptions() {
     if (unsubscribeExpenses) unsubscribeExpenses();
@@ -69,6 +69,59 @@ function sortByNewest(arr) {
         const timeB = (b.createdAt && b.createdAt.seconds) ? b.createdAt.seconds : 0;
         return timeB - timeA;
     });
+}
+
+function setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+function setPlaceholder(id, t) { const el = document.getElementById(id); if (el && 'placeholder' in el) el.placeholder = t; }
+
+// تطبيق اللغة الكامل (شاشة الدخول، التسجيل، الشعار، القائمة)
+function applyLanguage() {
+    try {
+        const isEng = document.documentElement.lang === 'en';
+        const langBtn = document.getElementById('lang-toggle');
+        if (langBtn) langBtn.textContent = isEng ? 'ع' : 'EN';
+
+        setText('logo-text-1', isEng ? 'Driver Expenses' : 'مصاريف السائق');
+        setText('logo-text-2', isEng ? 'Driver Expenses' : 'مصاريف السائق');
+
+        setText('login-welcome-title', isEng ? 'Welcome Back' : 'مرحباً بك');
+        setText('login-welcome-sub', isEng ? 'Sign in to access your account' : 'سجل دخولك للوصول إلى حسابك');
+        setText('email-login-btn', isEng ? 'Login' : 'دخول');
+        setText('login-no-account-text', isEng ? "Don't have an account?" : 'ليس لديك حساب؟');
+        setText('show-signup', isEng ? 'Sign up' : 'أنشئ حساباً جديداً');
+        setPlaceholder('login-email', isEng ? 'Email' : 'البريد الإلكتروني');
+        setPlaceholder('login-password', isEng ? 'Password' : 'كلمة المرور');
+
+        setText('signup-title-text', isEng ? 'Create Account' : 'حساب جديد');
+        setText('signup-sub-text', isEng ? 'Enter your details to create an account' : 'أدخل بياناتك لإنشاء حسابك الخاص');
+        setText('email-signup-btn', isEng ? 'Sign Up' : 'إنشاء الحساب');
+        setText('signup-has-account-text', isEng ? 'Already have an account?' : 'لديك حساب بالفعل؟');
+        setText('show-login', isEng ? 'Sign in' : 'سجل دخولك');
+        setPlaceholder('signup-name', isEng ? 'Full Name' : 'الاسم الكامل');
+        setPlaceholder('signup-email', isEng ? 'Email' : 'البريد الإلكتروني');
+        setPlaceholder('signup-password', isEng ? 'Password' : 'كلمة المرور');
+        setPlaceholder('signup-password-confirm', isEng ? 'Confirm Password' : 'تأكيد كلمة المرور');
+
+        setText('divider-or-text', isEng ? 'OR' : 'أو');
+        setText('google-btn-text', isEng ? 'Continue with Google' : 'المتابعة باستخدام Google');
+
+        document.querySelectorAll('.nav-item').forEach(el => {
+            if (isEng) {
+                if (el.innerHTML.includes('العمليات')) el.innerHTML = '<i class="fa-solid fa-receipt"></i> Operations';
+                if (el.innerHTML.includes('التحليلات')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> Analytics';
+                if (el.innerHTML.includes('السائقين')) el.innerHTML = '<i class="fa-solid fa-users"></i> Drivers';
+            } else {
+                if (el.innerHTML.includes('Operations')) el.innerHTML = '<i class="fa-solid fa-receipt"></i> العمليات';
+                if (el.innerHTML.includes('Analytics')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> التحليلات';
+                if (el.innerHTML.includes('Drivers')) el.innerHTML = '<i class="fa-solid fa-users"></i> السائقين';
+            }
+        });
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) logoutBtn.textContent = isEng ? 'Logout' : 'تسجيل خروج';
+        updateTelegramButtonUI();
+    } catch (err) {
+        console.error('applyLanguage error', err);
+    }
 }
 
 // ==========================================
@@ -1013,136 +1066,168 @@ document.addEventListener('click', async (e) => {
         const isEng = document.documentElement.lang === 'en';
         const originalText = btn.innerHTML;
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${isEng ? 'Generating...' : 'جاري إصدار التقرير...'}`;
-        
-        const totalAmt = document.getElementById('stat-total-amt').innerText;
-        const totalCb = document.getElementById('stat-total-cb').innerText;
-        const currentDate = new Date().toLocaleDateString(isEng ? 'en-US' : 'ar-SA');
+        try {
+            if (typeof html2canvas === 'undefined') throw new Error('REPORT_LIB_MISSING');
+            if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') throw new Error('REPORT_LIB_MISSING');
+            if (typeof Chart === 'undefined') throw new Error('CHART_LIB_MISSING');
 
-        const originalColor = Chart.defaults.color;
-        Chart.defaults.color = '#1e293b';
-        if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = '#1e293b'; barChartInstance.options.scales.y.ticks.color = '#1e293b'; barChartInstance.update(); }
-        if (pieChartInstance) { pieChartInstance.options.plugins.legend.display = true; pieChartInstance.options.plugins.legend.position = 'bottom'; pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; pieChartInstance.update(); }
-        if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = '#1e293b'; lineChartInstance.options.scales.y.ticks.color = '#1e293b'; lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; lineChartInstance.update(); }
+            const totalAmt = document.getElementById('stat-total-amt').innerText;
+            const totalCb = document.getElementById('stat-total-cb').innerText;
+            const currentDate = new Date().toLocaleDateString(isEng ? 'en-US' : 'ar-SA');
 
-        setTimeout(() => {
-            const getChartImage = (chart) => {
-                if (!chart) return '';
-                const canvas = chart.canvas;
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.fillStyle = '#ffffff'; 
-                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-                tempCtx.drawImage(canvas, 0, 0);
-                return tempCanvas.toDataURL('image/jpeg', 1.0);
-            };
+            const originalColor = Chart.defaults.color;
+            Chart.defaults.color = '#1e293b';
+            if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = '#1e293b'; barChartInstance.options.scales.y.ticks.color = '#1e293b'; barChartInstance.update(); }
+            if (pieChartInstance) { pieChartInstance.options.plugins.legend.display = true; pieChartInstance.options.plugins.legend.position = 'bottom'; pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; pieChartInstance.update(); }
+            if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = '#1e293b'; lineChartInstance.options.scales.y.ticks.color = '#1e293b'; lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; lineChartInstance.update(); }
 
-            const barImg = getChartImage(barChartInstance);
-            const pieImg = getChartImage(pieChartInstance);
-            const lineImg = getChartImage(lineChartInstance);
+            setTimeout(async () => {
+                let pdfTemplate = null;
+                try {
+                    const getChartImage = (chart) => {
+                        if (!chart) return '';
+                        const canvas = chart.canvas;
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
+                        const tempCtx = tempCanvas.getContext('2d');
+                        tempCtx.fillStyle = '#ffffff';
+                        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                        tempCtx.drawImage(canvas, 0, 0);
+                        return tempCanvas.toDataURL('image/jpeg', 0.95);
+                    };
 
-            Chart.defaults.color = originalColor;
-            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-            const restoreColor = isDark ? '#e2e8f0' : '#1e293b';
-            if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = restoreColor; barChartInstance.options.scales.y.ticks.color = restoreColor; barChartInstance.update(); }
-            if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = restoreColor; pieChartInstance.update(); }
-            if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = restoreColor; lineChartInstance.options.scales.y.ticks.color = restoreColor; lineChartInstance.options.plugins.legend.labels.color = restoreColor; lineChartInstance.update(); }
+                    const barImg = getChartImage(barChartInstance);
+                    const pieImg = getChartImage(pieChartInstance);
+                    const lineImg = getChartImage(lineChartInstance);
 
-            const titleStr = isEng ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
-            const dateStr = isEng ? 'Date:' : 'تاريخ التقرير:';
-            const totalExpStr = isEng ? 'Total Expenses' : 'إجمالي المصروفات';
-            const totalCbStr = isEng ? 'Total Cashback' : 'الاسترداد النقدي (Cashback)';
-            const top10Str = isEng ? 'Highest Spending Categories' : 'أعلى المتاجر صرفاً';
-            const distStr = isEng ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
-            const lineStr = isEng ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
+                    Chart.defaults.color = originalColor;
+                    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                    const restoreColor = isDark ? '#e2e8f0' : '#1e293b';
+                    if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = restoreColor; barChartInstance.options.scales.y.ticks.color = restoreColor; barChartInstance.update(); }
+                    if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = restoreColor; pieChartInstance.update(); }
+                    if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = restoreColor; lineChartInstance.options.scales.y.ticks.color = restoreColor; lineChartInstance.options.plugins.legend.labels.color = restoreColor; lineChartInstance.update(); }
 
-const pdfTemplate = document.createElement('div');
-            pdfTemplate.style.width = '800px'; // عرض ثابت ومناسب لصفحة A4
-            pdfTemplate.style.background = '#ffffff';
-            pdfTemplate.style.color = '#000000';
-            pdfTemplate.style.fontFamily = 'Arial, sans-serif';
-            pdfTemplate.style.direction = isEng ? 'ltr' : 'rtl';
-            pdfTemplate.style.padding = '30px';
-            
-            pdfTemplate.innerHTML = `
-                <!-- الصفحة الأولى: الهيدر، الكروت، والرسم الأول -->
-                <div style="page-break-after: always; padding-bottom: 20px;">
-                    <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; margin-bottom: 25px; padding-bottom: 10px;">
-                        <tr>
-                            <td>
-                                <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
-                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">${isEng ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
-                            </td>
-                            <td style="text-align: ${isEng ? 'right' : 'left'}; vertical-align: bottom;">
-                                <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
-                            </td>
-                        </tr>
-                    </table>
+                    const titleStr = isEng ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
+                    const dateStr = isEng ? 'Date:' : 'تاريخ التقرير:';
+                    const totalExpStr = isEng ? 'Total Expenses' : 'إجمالي المصروفات';
+                    const totalCbStr = isEng ? 'Total Cashback' : 'الاسترداد النقدي (Cashback)';
+                    const top10Str = isEng ? 'Highest Spending Categories' : 'أعلى المتاجر صرفاً';
+                    const distStr = isEng ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
+                    const lineStr = isEng ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
 
-                    <!-- الكروت المالية باستخدام جدول لتجنب التداخل -->
-                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-                        <tr>
-                            <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-${isEng ? 'left' : 'right'}: 5px solid #e74c3c; text-align: center;">
-                                <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalExpStr}</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
-                            </td>
-                            <td style="width: 4%;"></td>
-                            <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-${isEng ? 'left' : 'right'}: 5px solid #2ecc71; text-align: center;">
-                                <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalCbStr}</div>
-                                <div style="font-size: 24px; font-weight: bold; color: #15803d;">${totalCb}</div>
-                            </td>
-                        </tr>
-                    </table>
+                    pdfTemplate = document.createElement('div');
+                    pdfTemplate.style.cssText = "width: 800px; background: #ffffff; color: #000000; font-family: Arial, sans-serif; direction: ltr; padding: 30px; position: fixed; left: -10000px; top: 0; z-index: -1; box-sizing: border-box;";
+                    pdfTemplate.setAttribute('dir', 'ltr');
+                    pdfTemplate.innerHTML = `
+                        <div style="page-break-after: always; padding-bottom: 20px;">
+                            <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; margin-bottom: 25px; padding-bottom: 10px;">
+                                <tr>
+                                    ${isEng ? `
+                                    <td style="text-align: left;">
+                                        <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
+                                        <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">Driver Expense Tracking System</p>
+                                    </td>
+                                    <td style="text-align: right; vertical-align: bottom;">
+                                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
+                                    </td>` : `
+                                    <td style="text-align: left; vertical-align: bottom;">
+                                        <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
+                                    </td>
+                                    <td style="text-align: right;">
+                                        <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
+                                        <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">نظام إدارة مصاريف السائقين</p>
+                                    </td>`}
+                                </tr>
+                            </table>
 
-                    <div style="text-align: center;">
-                        <h3 style="color: #1e3a8a; margin-bottom: 15px; font-size: 16px;">${top10Str}</h3>
-                        <img src="${barImg}" style="width: 100%; max-height: 320px; object-fit: contain; display: block; margin: 0 auto;">
-                    </div>
-                </div>
-                
-                <!-- الصفحة الثانية: رسم الدائرة -->
-                <div style="page-break-after: always; padding-top: 20px; text-align: center;">
-                    <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${distStr}</h3>
-                    <img src="${pieImg}" style="width: 85%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
-                </div>
+                            <table style="width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 30px;">
+                                <tr>
+                                    <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-right: 5px solid #e74c3c; text-align: center;">
+                                        <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalExpStr}</div>
+                                        <div style="font-size: 24px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
+                                    </td>
+                                    <td style="width: 4%;"></td>
+                                    <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-right: 5px solid #2ecc71; text-align: center;">
+                                        <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalCbStr}</div>
+                                        <div style="font-size: 24px; font-weight: bold; color: #15803d;">${totalCb}</div>
+                                    </td>
+                                </tr>
+                            </table>
 
-                <!-- الصفحة الثالثة: الرسم الخطي -->
-                <div style="padding-top: 20px; text-align: center;">
-                    <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${lineStr}</h3>
-                    <img src="${lineImg}" style="width: 100%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
-                </div>
-            `;
+                            <div style="text-align: center;">
+                                <h3 style="color: #1e3a8a; margin-bottom: 15px; font-size: 16px;">${top10Str}</h3>
+                                <img src="${barImg}" style="width: 100%; max-height: 320px; object-fit: contain; display: block; margin: 0 auto;">
+                            </div>
+                        </div>
 
-            const opt = {
-                margin:       [10, 0, 15, 0],
-                filename:     isEng ? 'Financial_Report.pdf' : 'تقرير_المصاريف.pdf',
-                image:        { type: 'jpeg', quality: 1 },
-                html2canvas:  { 
-                scale: 2, 
-                useCORS: true,
-                windowWidth: 1024 
-                },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } 
-                };
+                        <div style="page-break-after: always; padding-top: 20px; text-align: center;">
+                            <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${distStr}</h3>
+                            <img src="${pieImg}" style="width: 85%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
+                        </div>
 
-            html2pdf().set(opt).from(pdfTemplate).toPdf().get('pdf').then(function (pdf) {
-                const totalPages = pdf.internal.getNumberOfPages();
-                for (let i = 1; i <= totalPages; i++) {
-                    pdf.setPage(i);
-                    pdf.setFontSize(10);
-                    pdf.setTextColor(100);
+                        <div style="padding-top: 20px; text-align: center;">
+                            <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${lineStr}</h3>
+                            <img src="${lineImg}" style="width: 100%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
+                        </div>
+                    `;
+
+                    document.body.appendChild(pdfTemplate);
+                    const canvas = await html2canvas(pdfTemplate, {
+                        scale: 2,
+                        useCORS: true,
+                        backgroundColor: '#ffffff',
+                        logging: false
+                    });
+                    document.body.removeChild(pdfTemplate);
+                    pdfTemplate = null;
+
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                     const pageWidth = pdf.internal.pageSize.getWidth();
                     const pageHeight = pdf.internal.pageSize.getHeight();
-                    pdf.text(String(i) + ' / ' + String(totalPages), pageWidth / 2, pageHeight - 10, { align: 'center' });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+                    const imgWidth = pageWidth;
+                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+                    let heightLeft = imgHeight;
+                    let position = 0;
+                    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+                    heightLeft -= pageHeight;
+                    while (heightLeft > 0) {
+                        position -= pageHeight;
+                        pdf.addPage();
+                        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight, undefined, 'FAST');
+                        heightLeft -= pageHeight;
+                    }
+
+                    const totalPages = pdf.internal.getNumberOfPages();
+                    for (let i = 1; i <= totalPages; i++) {
+                        pdf.setPage(i);
+                        pdf.setFontSize(10);
+                        pdf.setTextColor(100);
+                        pdf.text(String(i) + ' / ' + String(totalPages), pageWidth / 2, pageHeight - 8, { align: 'center' });
+                    }
+
+                    pdf.save(isEng ? 'Financial_Report.pdf' : 'تقرير_المصاريف.pdf');
+                    btn.innerHTML = originalText;
+                } catch (err) {
+                    console.error(err);
+                    if (pdfTemplate && pdfTemplate.parentNode) pdfTemplate.parentNode.removeChild(pdfTemplate);
+                    btn.innerHTML = originalText;
+                    Swal.fire({ icon: 'error', title: isEng ? 'PDF Error' : 'خطأ بالتقرير', text: isEng ? 'Could not generate the report. Try again.' : 'حصل خطأ أثناء إنشاء التقرير. حاول مجدداً.' });
                 }
-            }).save().then(() => {
-                btn.innerHTML = originalText;
-            }).catch(err => {
-                console.error(err);
-                btn.innerHTML = originalText;
+            }, 600);
+        } catch (err) {
+            console.error(err);
+            btn.innerHTML = originalText;
+            Swal.fire({
+                icon: 'error',
+                title: isEng ? 'PDF Error' : 'خطأ بالتقرير',
+                text: (err && (err.message === 'REPORT_LIB_MISSING' || err.message === 'CHART_LIB_MISSING'))
+                    ? (isEng ? 'Report library not loaded. Check your internet and reload the page.' : 'مكتبة التقرير لم تُحمّل. تأكد من الاتصال بالإنترنت وأعد تحميل الصفحة.')
+                    : (isEng ? 'Could not generate the report. Try again.' : 'حصل خطأ أثناء إنشاء التقرير. حاول مجدداً.')
             });
-        }, 500);
+        }
         return;
     }
 
@@ -1151,70 +1236,11 @@ const pdfTemplate = document.createElement('div');
     // ==========================================
     const langBtn = e.target.closest('#lang-toggle');
     if (langBtn) {
-        const currentLang = document.documentElement.lang;
-        const isAr = currentLang === 'ar';
-
-        if (isAr) {
-            document.getElementById('login-welcome-title').textContent = 'Welcome Back';
-document.getElementById('login-welcome-sub').textContent = 'Sign in to access your account';
-document.getElementById('email-login-btn').textContent = 'Login';
-document.getElementById('login-no-account-text').textContent = "Don't have an account?";
-document.getElementById('show-signup').textContent = 'Sign up';
-
-document.getElementById('signup-title-text').textContent = 'Create Account';
-document.getElementById('signup-sub-text').textContent = 'Enter your details to create an account';
-document.getElementById('email-signup-btn').textContent = 'Sign Up';
-document.getElementById('signup-has-account-text').textContent = 'Already have an account?';
-document.getElementById('show-login').textContent = 'Sign in';
-
-document.getElementById('divider-or-text').textContent = 'OR';
-document.getElementById('google-btn-text').textContent = 'Continue with Google';
-            document.getElementById('logo-text-1').textContent = 'Driver Expenses';
-            document.getElementById('logo-text-2').textContent = 'Driver Expenses';
-            document.documentElement.lang = 'en'; 
-            document.documentElement.dir = 'ltr'; 
-            langBtn.textContent = 'ع'; 
-            localStorage.setItem('site_lang', 'en');
-            
-            document.querySelectorAll('.nav-item').forEach(el => {
-                if(el.innerHTML.includes('العمليات')) el.innerHTML = '<i class="fa-solid fa-receipt"></i> Operations';
-                if(el.innerHTML.includes('التحليلات')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> Analytics';
-                if(el.innerHTML.includes('السائقين')) el.innerHTML = '<i class="fa-solid fa-users"></i> Drivers';
-            });
-            const logoutBtn = document.getElementById('logout-btn');
-            if(logoutBtn) logoutBtn.textContent = 'Logout';
-        } else {
-            document.getElementById('logo-text-1').textContent = 'مصاريف السائق';
-document.getElementById('logo-text-2').textContent = 'مصاريف السائق';
-document.getElementById('login-welcome-title').textContent = 'مرحباً بك';
-document.getElementById('login-welcome-sub').textContent = 'سجل دخولك للوصول إلى حسابك';
-document.getElementById('email-login-btn').textContent = 'دخول';
-document.getElementById('login-no-account-text').textContent = 'ليس لديك حساب؟';
-document.getElementById('show-signup').textContent = 'أنشئ حساباً جديداً';
-
-document.getElementById('signup-title-text').textContent = 'حساب جديد';
-document.getElementById('signup-sub-text').textContent = 'أدخل بياناتك لإنشاء حسابك الخاص';
-document.getElementById('email-signup-btn').textContent = 'إنشاء الحساب';
-document.getElementById('signup-has-account-text').textContent = 'لديك حساب بالفعل؟';
-document.getElementById('show-login').textContent = 'سجل دخولك';
-
-document.getElementById('divider-or-text').textContent = 'أو';
-document.getElementById('google-btn-text').textContent = 'المتابعة باستخدام Google';
-            document.getElementById('logo-text-1').textContent = 'مصاريف السائق';
-            document.getElementById('logo-text-2').textContent = 'مصاريف السائق';
-            document.documentElement.lang = 'ar'; 
-            document.documentElement.dir = 'rtl'; 
-            langBtn.textContent = 'EN'; 
-            localStorage.setItem('site_lang', 'ar');
-            
-            document.querySelectorAll('.nav-item').forEach(el => {
-                if(el.innerHTML.includes('Operations')) el.innerHTML = '<i class="fa-solid fa-receipt"></i> العمليات';
-                if(el.innerHTML.includes('Analytics')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> التحليلات';
-                if(el.innerHTML.includes('Drivers')) el.innerHTML = '<i class="fa-solid fa-users"></i> السائقين';
-            });
-            const logoutBtn = document.getElementById('logout-btn');
-            if(logoutBtn) logoutBtn.textContent = 'تسجيل خروج';
-        }
+        const isAr = document.documentElement.lang === 'ar';
+        document.documentElement.lang = isAr ? 'en' : 'ar';
+        document.documentElement.dir = isAr ? 'ltr' : 'rtl';
+        localStorage.setItem('site_lang', isAr ? 'en' : 'ar');
+        applyLanguage();
         
         const activeNavObj = document.querySelector('.nav-item.active');
         if(activeNavObj) {
