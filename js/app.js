@@ -27,6 +27,10 @@ let currentUser = null;
 let unsubscribeExpenses = null;
 let unsubscribeDrivers = null;
 let unsubscribeDashboardDrivers = null;
+let unsubscribeDriversExpenses = null;
+let unsubscribeAnalyticsDrivers = null;
+let unsubscribeAnalyticsExpenses = null;
+let unsubscribeTelegramObserver = null;
 let activeDriverId = null; 
 window.userTelegramLinked = false; // متغير عالمي يراقب حالة التيليجرام بدون قلتش
 
@@ -47,6 +51,24 @@ function cleanupSubscriptions() {
     if (unsubscribeExpenses) unsubscribeExpenses();
     if (unsubscribeDrivers) unsubscribeDrivers();
     if (unsubscribeDashboardDrivers) unsubscribeDashboardDrivers();
+    if (unsubscribeDriversExpenses) unsubscribeDriversExpenses();
+    if (unsubscribeAnalyticsDrivers) unsubscribeAnalyticsDrivers();
+    if (unsubscribeAnalyticsExpenses) unsubscribeAnalyticsExpenses();
+    unsubscribeExpenses = null;
+    unsubscribeDrivers = null;
+    unsubscribeDashboardDrivers = null;
+    unsubscribeDriversExpenses = null;
+    unsubscribeAnalyticsDrivers = null;
+    unsubscribeAnalyticsExpenses = null;
+}
+
+// ترتيب السائقين من الأحدث للأقدم
+function sortByNewest(arr) {
+    return arr.slice().sort((a, b) => {
+        const timeA = (a.createdAt && a.createdAt.seconds) ? a.createdAt.seconds : 0;
+        const timeB = (b.createdAt && b.createdAt.seconds) ? b.createdAt.seconds : 0;
+        return timeB - timeA;
+    });
 }
 
 // ==========================================
@@ -54,8 +76,9 @@ function cleanupSubscriptions() {
 // ==========================================
 function startTelegramObserver(uid) {
     try {
+        if (unsubscribeTelegramObserver) unsubscribeTelegramObserver();
         const userRef = doc(db, 'users', uid);
-        onSnapshot(userRef, (docSnap) => {
+        unsubscribeTelegramObserver = onSnapshot(userRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 window.userTelegramLinked = !!data.telegramId;
@@ -71,12 +94,14 @@ function updateTelegramButtonUI() {
     const btn = document.getElementById('dynamic-telegram-btn');
     if (!btn) return;
     
+    const isEng = document.documentElement.lang === 'en';
+    
     if (window.userTelegramLinked) {
-        btn.innerHTML = '➕ إضافة مشتريات';
+        btn.innerHTML = isEng ? '➕ Add Expenses' : '➕ إضافة مشتريات';
         btn.style.backgroundColor = '#28a745';
         btn.onclick = () => window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
     } else {
-        btn.innerHTML = '🤖 ربط البوت';
+        btn.innerHTML = isEng ? '🤖 Link Bot' : '🤖 ربط البوت';
         btn.style.backgroundColor = '#0088cc';
         btn.onclick = () => window.open(`https://t.me/${BOT_USERNAME}?start=${currentUser.uid}`, '_blank');
     }
@@ -90,17 +115,19 @@ navItems.forEach(item => {
             item.classList.add('active');
             cleanupSubscriptions();
             
+            const isEng = document.documentElement.lang === 'en';
             const target = item.getAttribute('data-target');
+            
             if (target === 'manage') {
-                document.getElementById('page-title').textContent = "إدارة العمليات";
+                document.getElementById('page-title').textContent = isEng ? "Operations Management" : "إدارة العمليات";
                 renderDashboard();
                 fetchDashboardDrivers();
             } else if (target === 'analytics') {
-                document.getElementById('page-title').textContent = "لوحة التحليلات";
+                document.getElementById('page-title').textContent = isEng ? "Analytics Dashboard" : "لوحة التحليلات";
                 renderAnalyticsPage();
                 fetchAnalyticsData();
             } else if (target === 'drivers') {
-                document.getElementById('page-title').textContent = "إدارة السائقين";
+                document.getElementById('page-title').textContent = isEng ? "Drivers Management" : "إدارة السائقين";
                 renderDriversPage();
                 fetchDriversList();
             }
@@ -126,51 +153,68 @@ window.addEventListener('userLoggedIn', (e) => {
 // 4. صفحة العمليات (إدارة العمليات)
 // ==========================================
 function renderDashboard() {
+    const isEng = document.documentElement.lang === 'en';
+    
+    // ترجمة النصوص الثابتة في الجدول
+    const t_loadingDrivers = isEng ? "Loading drivers..." : "جاري تحميل السائقين...";
+    const t_history = isEng ? "Expenses History" : "سجل العمليات";
+    const t_btnCheck = isEng ? "⏳ Checking..." : "⏳ جاري التحقق...";
+    const t_store = isEng ? "Store" : "المتجر";
+    const t_date = isEng ? "Date" : "التاريخ";
+    const t_amount = isEng ? "Amount" : "المبلغ";
+    const t_cashback = isEng ? "Cashback" : "الكاش باك";
+    const t_status = isEng ? "Status" : "الحالة";
+    const t_receipt = isEng ? "Receipt" : "الفاتورة";
+    const t_action = isEng ? "Action" : "إجراء";
+    const t_emptyMsg = isEng ? "Please add and select a driver to view expenses." : "الرجاء إضافة واختيار سائق لعرض عملياته.";
+
     contentArea.innerHTML = `
         <div id="dashboard-driver-tabs" style="display: flex; gap: 10px; margin-bottom: 25px; overflow-x: auto; padding-bottom: 5px;">
-            <span style="color: var(--text-muted); font-size: 13px;">جاري تحميل السائقين...</span>
+            <span style="color: var(--text-muted); font-size: 13px;">${t_loadingDrivers}</span>
         </div>
 
         <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="font-size: 18px; font-weight: 600; margin: 0;">سجل العمليات</h3>
-            <!-- زر التيليجرام الديناميكي الذي يتغير بناءً على حالة الربط -->
+            <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${t_history}</h3>
             <button id="dynamic-telegram-btn" class="btn-primary" style="flex: none; width: auto; font-size: 13px; padding: 8px 15px; font-weight:bold;">
-                ⏳ جاري التحقق...
+                ${t_btnCheck}
             </button>
         </div>
         
         <div class="table-container" style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; overflow-x: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: right;">
+            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: ${isEng ? 'left' : 'right'};">
                 <thead style="background-color: rgba(150, 150, 150, 0.05);">
                     <tr>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">المتجر</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">التاريخ</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">المبلغ</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">الكاش باك</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">الحالة</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">الفاتورة</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">إجراء</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_store}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_date}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_amount}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_cashback}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_status}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_receipt}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_action}</th>
                     </tr>
                 </thead>
                 <tbody id="expenses-tbody">
-                    <tr><td colspan="7" style="text-align: center; padding: 30px; color: var(--text-muted);">الرجاء إضافة واختيار سائق لعرض عملياته.</td></tr>
+                    <tr><td colspan="7" style="text-align: center; padding: 30px; color: var(--text-muted);">${t_emptyMsg}</td></tr>
                 </tbody>
             </table>
         </div>
     `;
-    updateTelegramButtonUI(); // تحديث الزر فوراً بعد رسمه
+    updateTelegramButtonUI(); 
 }
 
 function fetchDashboardDrivers() {
     try {
         const q = query(collection(db, "drivers"), where("userId", "==", currentUser.uid));
+        if (unsubscribeDashboardDrivers) unsubscribeDashboardDrivers();
         unsubscribeDashboardDrivers = onSnapshot(q, (snapshot) => {
             const tabsContainer = document.getElementById('dashboard-driver-tabs');
             if (!tabsContainer) return;
             tabsContainer.innerHTML = '';
             
+            const isEng = document.documentElement.lang === 'en';
+            
             if (snapshot.empty) {
-                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">لا يوجد سائقين. اذهب لصفحة "السائقين" من القائمة للإضافة.</span>`;
+                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">${isEng ? "No drivers found. Add them from Drivers page." : "لا يوجد سائقين. اذهب لصفحة السائقين للإضافة."}</span>`;
                 activeDriverId = null;
                 if (unsubscribeExpenses) unsubscribeExpenses();
                 return;
@@ -179,11 +223,7 @@ function fetchDashboardDrivers() {
             let drivers = [];
             snapshot.forEach(docSnap => drivers.push({ id: docSnap.id, ...docSnap.data() }));
             
-            drivers.sort((a, b) => {
-                const timeA = (a.createdAt && a.createdAt.seconds) ? a.createdAt.seconds : 0;
-                const timeB = (b.createdAt && b.createdAt.seconds) ? b.createdAt.seconds : 0;
-                return timeB - timeA;
-            });
+            drivers = sortByNewest(drivers);
 
             if (!activeDriverId || !drivers.some(d => d.id === activeDriverId)) {
                 activeDriverId = drivers[0].id;
@@ -216,12 +256,14 @@ function fetchUserExpenses(driverId) {
     try {
         const q = query(collection(db, "expenses"), where("userId", "==", currentUser.uid), where("driverId", "==", driverId));
         const tbody = document.getElementById('expenses-tbody');
+        const isEng = document.documentElement.lang === 'en';
 
         unsubscribeExpenses = onSnapshot(q, (snapshot) => {
             if (!tbody) return;
             tbody.innerHTML = ''; 
+            
             if (snapshot.empty) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">لا توجد عمليات مسجلة لهذا السائق.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">${isEng ? "No operations recorded for this driver." : "لا توجد عمليات مسجلة لهذا السائق."}</td></tr>`;
                 return;
             }
 
@@ -236,24 +278,37 @@ function fetchUserExpenses(driverId) {
 
             expensesArray.forEach((data) => {
                 const id = data.id;
-                const receiptBadge = data.receiptUrl 
-                    ? `<a href="${data.receiptUrl}" target="_blank" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none; display: inline-block;"><i class="fa-solid fa-check"></i> الفاتورة</a>` 
-                    : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> إرفاق</button>`;
+                const t_currency = isEng ? "SAR" : "ريال";
+                
+                // --- إصلاح مشكلة الفاتورة (علامة الناقص) واللون الأصفر ---
+                // نعتبر أن الفاتورة غير موجودة إذا كانت قيمتها فارغة أو "-" أو "pending"
+                const hasReceipt = data.receiptUrl && data.receiptUrl !== '-' && data.receiptUrl.toLowerCase() !== 'pending';
+                
+                // توحيد قراءة الحالة لتكون Case-Insensitive (سواء Completed أو completed)
+                const isCompleted = data.status && data.status.toLowerCase() === 'completed';
+                
+                // تحديد اللون: أخضر إذا كانت مكتملة، أصفر لغير ذلك
+                const statusColor = isCompleted ? '#10b981' : '#eab308';
+                const statusText = isEng ? (isCompleted ? "Completed" : "Pending") : (isCompleted ? "مكتملة" : "معلقة");
+                const statusBadge = `<span style="color: ${statusColor}">●</span> ${statusText}`;
+                
+                const receiptBadge = hasReceipt 
+                    ? `<a href="${data.receiptUrl}" target="_blank" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none; display: inline-block;"><i class="fa-solid fa-check"></i> ${isEng ? 'Receipt' : 'الفاتورة'}</a>` 
+                    : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> ${isEng ? 'Attach' : 'إرفاق'}</button>`;
                     
                 tbody.innerHTML += `
                     <tr id="exp-row-${id}" style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
-                        <td class="col-shop" style="padding: 16px; font-weight: 500;">${data.shopName || 'غير معروف'}</td>
+                        <td class="col-shop" style="padding: 16px; font-weight: 500;">${data.shopName || (isEng ? 'Unknown' : 'غير معروف')}</td>
                         <td class="col-date" style="padding: 16px; color: var(--text-muted); font-size: 14px;" dir="ltr">${data.date || '-'}</td>
-                        <td class="col-amount" style="padding: 16px;" data-val="${data.amount || 0}">${data.amount || 0} ريال</td>
-                        <td class="col-cashback" style="padding: 16px; color: var(--success);" data-val="${data.cashback || 0}">${data.cashback > 0 ? data.cashback + ' ريال' : '-'}</td>
-                        <td class="col-status" style="padding: 16px;">
-                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:6px; background-color:${data.status === 'مكتملة' ? '#2ecc71' : '#d4af37'}"></span> 
-                            ${data.status || 'معلقة'}
+                        <td class="col-amount" style="padding: 16px;" data-val="${data.amount || 0}">${data.amount || 0} ${t_currency}</td>
+                        <td class="col-cashback" style="padding: 16px; color: var(--success);" data-val="${data.cashback || 0}">${data.cashback > 0 ? data.cashback + ' ' + t_currency : '-'}</td>
+                        <td class="col-status" style="padding: 16px; font-weight: 600;">
+                            ${statusBadge}
                         </td>
                         <td style="padding: 16px;">${receiptBadge}</td>
                         <td class="col-actions" style="padding: 16px; white-space: nowrap;">
-                            <button class="btn-text edit-expense-btn" data-id="${id}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 10px; border-radius: 6px; margin-left: 5px;" title="تعديل"><i class="fa-solid fa-pen"></i></button>
-                            <button class="btn-text delete-btn" data-id="${id}" style="color: var(--danger); font-size: 15px; background: rgba(231, 76, 60, 0.1); padding: 6px 10px; border-radius: 6px;" title="حذف"><i class="fa-solid fa-trash"></i></button>
+                            <button class="btn-text edit-expense-btn" data-id="${id}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 10px; border-radius: 6px; margin-left: 5px;" title="${isEng ? 'Edit' : 'تعديل'}"><i class="fa-solid fa-pen"></i></button>
+                            <button class="btn-text delete-btn" data-id="${id}" style="color: var(--danger); font-size: 15px; background: rgba(231, 76, 60, 0.1); padding: 6px 10px; border-radius: 6px;" title="${isEng ? 'Delete' : 'حذف'}"><i class="fa-solid fa-trash"></i></button>
                         </td>
                     </tr>
                 `;
@@ -265,58 +320,80 @@ function fetchUserExpenses(driverId) {
 // ==========================================
 // 5. صفحة إدارة السائقين
 // ==========================================
-let driversExpensesUnsub = null;
-
 function renderDriversPage() {
+    const isEng = document.documentElement.lang === 'en';
+    const t_title = isEng ? "Add New Driver" : "إضافة سائق جديد";
+    const t_name = isEng ? "Driver Name (Required)" : "اسم السائق (إلزامي)";
+    const t_car = isEng ? "Car Details" : "السيارة";
+    const t_card = isEng ? "Card Type" : "نوع البطاقة";
+    const t_cardPlaceholder = isEng ? "e.g. Visa..." : "اكتب نوع البطاقة...";
+    const t_save = isEng ? "Save" : "حفظ";
+    const t_cancel = isEng ? "Cancel" : "إلغاء";
+    
+    // خيارات البطاقة
+    const optChoose = isEng ? "Choose..." : "اختر...";
+    const optMada = isEng ? "Mada" : "مدى";
+    const optVisa = "Visa";
+    const optMaster = "MasterCard";
+    const optOther = isEng ? "Other (Type it)" : "أخرى (كتابة)";
+
+    // رؤوس الجدول
+    const t_thName = isEng ? "Driver Name" : "اسم السائق";
+    const t_thCar = isEng ? "Car" : "السيارة";
+    const t_thCard = isEng ? "Card Type" : "نوع البطاقة";
+    const t_thTotal = isEng ? "Total Expenses" : "مجموع المصاريف";
+    const t_thEdit = isEng ? "Edit" : "تعديل";
+    const t_thDel = isEng ? "Delete" : "حذف";
+
     contentArea.innerHTML = `
         <div style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h3 id="form-title" style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">إضافة سائق جديد</h3>
+            <h3 id="form-title" style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">${t_title}</h3>
             <form id="add-driver-form" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                 <input type="hidden" id="edit-driver-id" value="">
                 
                 <div style="flex: 1; min-width: 150px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">اسم السائق (إلزامي)</label>
-                    <input type="text" id="driver-name" placeholder="أدخل الاسم" required style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">${t_name}</label>
+                    <input type="text" id="driver-name" required style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
                 </div>
                 
                 <div style="flex: 1; min-width: 150px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">السيارة</label>
-                    <input type="text" id="driver-car" placeholder="مثال: كامري 2024" style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 5px;">${t_car}</label>
+                    <input type="text" id="driver-car" style="width: 100%; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
                 </div>
                 
                 <div style="flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 5px;">
-                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 0px;">نوع البطاقة</label>
+                    <label style="display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 0px;">${t_card}</label>
                     <div style="display: flex; gap: 5px; width: 100%;">
                         <select id="driver-card" style="flex: 1; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box; appearance: auto;">
-                            <option value="">اختر...</option>
-                            <option value="مدى">مدى</option>
-                            <option value="فيزا">فيزا</option>
-                            <option value="ماستركارد">ماستركارد</option>
-                            <option value="أخرى">أخرى (كتابة)</option>
+                            <option value="">${optChoose}</option>
+                            <option value="مدى">${optMada}</option>
+                            <option value="فيزا">${optVisa}</option>
+                            <option value="ماستركارد">${optMaster}</option>
+                            <option value="أخرى">${optOther}</option>
                         </select>
-                        <input type="text" id="driver-card-other" placeholder="اكتب نوع البطاقة..." style="display: none; flex: 1; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
+                        <input type="text" id="driver-card-other" placeholder="${t_cardPlaceholder}" style="display: none; flex: 1; padding: 10px 14px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); outline: none; box-sizing: border-box;">
                     </div>
                 </div>
                 
-                <button type="submit" id="submit-driver-btn" class="btn-primary" style="flex: none; padding: 10px 25px; font-size: 14px; height: 42px; white-space: nowrap;"><i class="fa-solid fa-floppy-disk"></i> حفظ</button>
-                <button type="button" id="cancel-edit-btn" style="display: none; background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 20px; border-radius: 8px; font-size: 14px; height: 42px; cursor: pointer;">إلغاء</button>
+                <button type="submit" id="submit-driver-btn" class="btn-primary" style="flex: none; padding: 10px 25px; font-size: 14px; height: 42px; white-space: nowrap;"><i class="fa-solid fa-floppy-disk"></i> <span id="submit-btn-text">${t_save}</span></button>
+                <button type="button" id="cancel-edit-btn" style="display: none; background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 20px; border-radius: 8px; font-size: 14px; height: 42px; cursor: pointer;">${t_cancel}</button>
             </form>
         </div>
 
         <div class="table-container" style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; overflow-x: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: right;">
+            <table class="saas-table" style="width: 100%; border-collapse: collapse; text-align: ${isEng ? 'left' : 'right'};">
                 <thead style="background-color: rgba(150, 150, 150, 0.05);">
                     <tr>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">اسم السائق</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">السيارة</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">نوع البطاقة</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">مجموع المصاريف</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">تعديل</th>
-                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">حذف</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_thName}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_thCar}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_thCard}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px;">${t_thTotal}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">${t_thEdit}</th>
+                        <th style="padding: 16px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 13px; text-align: center; width: 80px;">${t_thDel}</th>
                     </tr>
                 </thead>
                 <tbody id="drivers-tbody">
-                    <tr><td colspan="6" style="text-align: center; padding: 30px; color: var(--text-muted);">جاري جلب السائقين...</td></tr>
+                    <tr><td colspan="6" style="text-align: center; padding: 30px; color: var(--text-muted);">${isEng ? "Loading..." : "جاري جلب السائقين..."}</td></tr>
                 </tbody>
             </table>
         </div>
@@ -326,19 +403,21 @@ function renderDriversPage() {
 function fetchDriversList() {
     const tbody = document.getElementById('drivers-tbody');
     if (!tbody) return;
+    const isEng = document.documentElement.lang === 'en';
 
     try {
         const q = query(collection(db, "drivers"), where("userId", "==", currentUser.uid));
         const expensesQ = query(collection(db, "expenses"), where("userId", "==", currentUser.uid));
 
+        if (unsubscribeDrivers) unsubscribeDrivers();
         unsubscribeDrivers = onSnapshot(q, (driverSnapshot) => {
-            if (window.driversExpensesUnsub) window.driversExpensesUnsub();
+            if (unsubscribeDriversExpenses) unsubscribeDriversExpenses();
             
-            window.driversExpensesUnsub = onSnapshot(expensesQ, (expenseSnapshot) => {
+            unsubscribeDriversExpenses = onSnapshot(expensesQ, (expenseSnapshot) => {
                 tbody.innerHTML = '';
                 
                 if (driverSnapshot.empty) {
-                    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">لا يوجد سائقين. قم بالإضافة بالأعلى.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">${isEng ? "No drivers found. Add above." : "لا يوجد سائقين. قم بالإضافة بالأعلى."}</td></tr>`;
                     return;
                 }
 
@@ -351,11 +430,7 @@ function fetchDriversList() {
                 let driversArray = [];
                 driverSnapshot.forEach(docSnap => driversArray.push({ id: docSnap.id, ...docSnap.data() }));
                 
-                driversArray.sort((a, b) => {
-                    const timeA = (a.createdAt && a.createdAt.seconds) ? a.createdAt.seconds : 0;
-                    const timeB = (b.createdAt && b.createdAt.seconds) ? b.createdAt.seconds : 0;
-                    return timeB - timeA;
-                });
+                driversArray = sortByNewest(driversArray);
 
                 driversArray.forEach((data) => {
                     const id = data.id;
@@ -366,12 +441,12 @@ function fetchDriversList() {
                             <td style="padding: 16px; font-weight: 500;">${data.name}</td>
                             <td style="padding: 16px; color: var(--text-muted);">${data.car || '-'}</td>
                             <td style="padding: 16px; color: var(--text-muted);">${data.cardType || '-'}</td>
-                            <td style="padding: 16px; color: var(--danger); font-weight: bold;">${total} ريال</td>
+                            <td style="padding: 16px; color: var(--danger); font-weight: bold;">${total} ${isEng ? 'SAR' : 'ريال'}</td>
                             <td style="padding: 16px; text-align: center;">
-                                <button class="btn-text edit-driver-btn" data-id="${id}" data-name="${data.name}" data-car="${data.car || ''}" data-card="${data.cardType || ''}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 12px; border-radius: 6px;" title="تعديل"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button class="btn-text edit-driver-btn" data-id="${id}" data-name="${data.name}" data-car="${data.car || ''}" data-card="${data.cardType || ''}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 12px; border-radius: 6px;"><i class="fa-solid fa-pen-to-square"></i></button>
                             </td>
                             <td style="padding: 16px; text-align: center;">
-                                <button class="btn-text delete-driver-btn" data-id="${id}" style="color: var(--danger); font-size: 14px; background: rgba(231, 76, 60, 0.1); padding: 6px 12px; border-radius: 6px; font-weight: bold; transition: all 0.2s;" title="حذف"><i class="fa-solid fa-trash"></i></button>
+                                <button class="btn-text delete-driver-btn" data-id="${id}" style="color: var(--danger); font-size: 14px; background: rgba(231, 76, 60, 0.1); padding: 6px 12px; border-radius: 6px; font-weight: bold; transition: all 0.2s;"><i class="fa-solid fa-trash"></i></button>
                             </td>
                         </tr>
                     `;
@@ -379,123 +454,106 @@ function fetchDriversList() {
             });
         });
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 20px;">حدث خطأ في قراءة البيانات.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 20px;">Error loading data.</td></tr>`;
     }
 }
 // ==========================================
 // 6. صفحة الإعدادات
 // ==========================================
 function renderSettingsPage() {
-    document.getElementById('page-title').textContent = "إعدادات الحساب";
+    const isEng = document.documentElement.lang === 'en';
+    document.getElementById('page-title').textContent = isEng ? "Account Settings" : "إعدادات الحساب";
     const currentName = document.getElementById('user-name').textContent;
     const currentEmail = currentUser && currentUser.email ? currentUser.email : '';
     
     contentArea.innerHTML = `
         <div style="background-color: var(--bg-surface); border: 1px solid rgba(130, 130, 130, 0.3); border-radius: 12px; padding: 35px; margin: 0 auto; max-width: 650px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h3 style="font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 25px; color: var(--primary-accent); border-bottom: 1px solid rgba(130,130,130,0.2); padding-bottom: 10px;">المعلومات الشخصية</h3>
+            <h3 style="font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 25px; color: var(--primary-accent); border-bottom: 1px solid rgba(130,130,130,0.2); padding-bottom: 10px;">${isEng ? "Personal Info" : "المعلومات الشخصية"}</h3>
 
             <form id="settings-form" style="display: flex; flex-direction: column; gap: 20px;">
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">الاسم:</label>
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Name:" : "الاسم:"}</label>
                     <input type="text" id="settings-name-input" value="${currentName === '...' ? '' : currentName}" required autocomplete="off" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">الإيميل:</label>
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Email:" : "الإيميل:"}</label>
                     <input type="email" id="settings-email-input" value="${currentEmail}" required autocomplete="off" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">الرقم السري:</label>
-                    <input type="password" id="settings-password-input" placeholder="******** (للتغيير اكتب هنا)" autocomplete="new-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Password:" : "الرقم السري:"}</label>
+                    <input type="password" id="settings-password-input" placeholder="********" autocomplete="new-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
 
                 <div style="display: flex; gap: 15px; margin-top: 15px; justify-content: center;">
-                    <button type="button" id="cancel-settings-btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 40px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s;">إلغاء</button>
-                    <button type="submit" id="save-settings-btn" class="btn-primary" style="padding: 10px 50px; font-size: 15px; font-weight: 600; transition: 0.2s;">حفظ</button>
+                    <button type="submit" id="save-settings-btn" class="btn-primary" style="padding: 10px 50px; font-size: 15px; font-weight: 600; transition: 0.2s;">${isEng ? "Save" : "حفظ"}</button>
                 </div>
             </form>
-
-            <div id="otp-verification-section" style="display: none; text-align: center; padding: 20px;">
-                <i class="fa-solid fa-envelope-circle-check fa-3x" style="color: var(--primary-accent); margin-bottom: 15px;"></i>
-                <h4 style="font-size: 18px; margin-bottom: 10px;">تحقق من الإيميل الجديد</h4>
-                <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">أرسلنا رمز تحقق مكون من 6 أرقام إلى إيميلك. <br>(للتجربة حالياً اكتب: 123456)</p>
-                <input type="text" id="otp-input" placeholder="------" maxlength="6" style="text-align: center; letter-spacing: 15px; font-size: 24px; font-weight: bold; padding: 15px; width: 220px; margin: 0 auto 25px auto; display: block; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.5); border-radius: 8px; color: var(--text-primary); outline: none;">
-                <div style="display: flex; gap: 10px; justify-content: center;">
-                    <button type="button" id="cancel-otp-btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 30px; border-radius: 8px; cursor: pointer; font-weight: 600;">تراجع</button>
-                    <button type="button" id="confirm-otp-btn" class="btn-primary" style="padding: 10px 40px; font-weight: 600;">تأكيد الرمز</button>
-                </div>
-            </div>
         </div>
     `;
 }
 
 // ==========================================
-// 7. صفحة التحليلات (وإنشاء PDF) - التحديث الجذري
+// 7. صفحة التحليلات (وإنشاء PDF) 
 // ==========================================
 let barChartInstance = null;
 let pieChartInstance = null;
 let lineChartInstance = null;
 let activeAnalyticsDriverId = null;
 let activeTimeRange = '1m'; 
-let globalDriversList = []; // نحفظ السواقين هنا عشان نستخدمهم في رسم خطوط المقارنة
+let globalDriversList = []; 
 
 function renderAnalyticsPage() {
+    const isEng = document.documentElement.lang === 'en';
     contentArea.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <div id="analytics-driver-tabs" style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px;">
-                <span style="color: var(--text-muted); font-size: 13px;">جاري تحميل السائقين...</span>
+                <span style="color: var(--text-muted); font-size: 13px;">${isEng ? "Loading..." : "جاري تحميل السائقين..."}</span>
             </div>
-            <!-- زر إنشاء التقرير PDF -->
             <button id="export-pdf-btn" class="btn-primary" style="flex: none; background-color: #e74c3c; border-color: #e74c3c; font-size: 13px; padding: 8px 15px; border-radius: 8px;">
-                <i class="fa-solid fa-file-pdf"></i> إنشاء تقرير PDF
+                <i class="fa-solid fa-file-pdf"></i> ${isEng ? "Export PDF" : "إنشاء تقرير PDF"}
             </button>
         </div>
 
         <div id="time-filters-container" style="display: flex; gap: 10px; margin-bottom: 25px; justify-content: center; flex-wrap: wrap; background: var(--bg-surface); padding: 10px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.2);">
-            <button class="time-filter-btn active" data-range="1m" style="padding: 6px 16px; border-radius: 20px; border: none; background: var(--primary-accent); color: white; cursor: pointer;">شهر</button>
-            <button class="time-filter-btn" data-range="3m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">3 أشهر</button>
-            <button class="time-filter-btn" data-range="6m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">6 أشهر</button>
-            <button class="time-filter-btn" data-range="1y" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">سنة</button>
-            <button class="time-filter-btn" data-range="all" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">كل الأوقات</button>
+            <button class="time-filter-btn active" data-range="1m" style="padding: 6px 16px; border-radius: 20px; border: none; background: var(--primary-accent); color: white; cursor: pointer;">${isEng ? '1 Month' : 'شهر'}</button>
+            <button class="time-filter-btn" data-range="3m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEng ? '3 Months' : '3 أشهر'}</button>
+            <button class="time-filter-btn" data-range="6m" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEng ? '6 Months' : '6 أشهر'}</button>
+            <button class="time-filter-btn" data-range="1y" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEng ? '1 Year' : 'سنة'}</button>
+            <button class="time-filter-btn" data-range="all" style="padding: 6px 16px; border-radius: 20px; border: none; background: transparent; color: var(--text-primary); cursor: pointer;">${isEng ? 'All Time' : 'كل الأوقات'}</button>
         </div>
 
-        <!-- المنطقة التي سيتم تحويلها لـ PDF -->
         <div id="pdf-export-area" style="background: var(--bg-base); padding: 15px; border-radius: 12px;">
             
-            <!-- الصف الأول: الكروت الأساسية (2 فقط) -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 25px;">
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center;">
-                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-money-bill-wave"></i> إجمالي الصرفية</div>
-                    <div id="stat-total-amt" style="font-size: 32px; font-weight: bold; color: var(--danger);">0 ريال</div>
+                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-money-bill-wave"></i> ${isEng ? 'Total Expenses' : 'إجمالي الصرفية'}</div>
+                    <div id="stat-total-amt" style="font-size: 32px; font-weight: bold; color: var(--danger);">0</div>
                 </div>
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center;">
-                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-hand-holding-dollar"></i> كاش باك مسترجع</div>
-                    <div id="stat-total-cb" style="font-size: 32px; font-weight: bold; color: #2ecc71;">0 ريال</div>
+                    <div style="color: var(--text-muted); font-size: 15px; margin-bottom: 10px;"><i class="fa-solid fa-hand-holding-dollar"></i> ${isEng ? 'Total Cashback' : 'كاش باك مسترجع'}</div>
+                    <div id="stat-total-cb" style="font-size: 32px; font-weight: bold; color: #2ecc71;">0</div>
                 </div>
             </div>
 
-            <!-- الصف الثاني: البار جراف (اليسار) والباى شارت (اليمين) -->
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                <!-- رسم الأعمدة -->
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); flex: 2;">
-                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">أكثر مبالغ تم صرفها (أعلى 10 محلات)</h3>
+                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">${isEng ? 'Highest Spending Categories (Top 10)' : 'أكثر مبالغ تم صرفها (أعلى 10 محلات)'}</h3>
                     <div style="position: relative; height: 300px; width: 100%;">
                         <canvas id="barChart"></canvas>
                     </div>
                 </div>
-                <!-- رسم الدائرة -->
                 <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05); flex: 1;">
-                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">توزيع المصاريف (النسب المئوية)</h3>
+                    <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">${isEng ? 'Expenses Distribution' : 'توزيع المصاريف (النسب المئوية)'}</h3>
                     <div style="position: relative; height: 300px; width: 100%;">
                         <canvas id="pieChart"></canvas>
                     </div>
                 </div>
             </div>
 
-            <!-- الصف الثالث: الرسم الخطي لمقارنة كل السواقين -->
             <div style="background-color: var(--bg-surface); padding: 25px; border-radius: 12px; border: 1px solid rgba(130, 130, 130, 0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
-                <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">مقارنة صرف السائقين عبر الزمن</h3>
+                <h3 style="font-size: 16px; font-weight: 600; margin-top: 0; margin-bottom: 20px;">${isEng ? 'Spending Trends Over Time' : 'مقارنة صرف السائقين عبر الزمن'}</h3>
                 <div style="position: relative; height: 350px; width: 100%;">
                     <canvas id="lineChart"></canvas>
                 </div>
@@ -504,21 +562,22 @@ function renderAnalyticsPage() {
     `;
 }
 
-window.fetchAnalyticsData = function() {
+function fetchAnalyticsData() {
     try {
         const q = query(collection(db, "drivers"), where("userId", "==", currentUser.uid));
-        if (window.unsubAnalyticsDrivers) window.unsubAnalyticsDrivers();
+        if (unsubscribeAnalyticsDrivers) unsubscribeAnalyticsDrivers();
         
-        window.unsubAnalyticsDrivers = onSnapshot(q, (snapshot) => {
+        unsubscribeAnalyticsDrivers = onSnapshot(q, (snapshot) => {
             const tabsContainer = document.getElementById('analytics-driver-tabs');
             if (!tabsContainer) return;
             tabsContainer.innerHTML = '';
+            const isEng = document.documentElement.lang === 'en';
             
             globalDriversList = []; 
             snapshot.forEach(docSnap => globalDriversList.push({ id: docSnap.id, ...docSnap.data() }));
 
             if (globalDriversList.length === 0) {
-                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">لا يوجد سائقين.</span>`;
+                tabsContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 13px;">${isEng ? "No drivers found." : "لا يوجد سائقين."}</span>`;
                 return;
             }
 
@@ -545,12 +604,14 @@ window.fetchAnalyticsData = function() {
 
 function processDriverAnalytics() {
     if (globalDriversList.length === 0) return;
+    const isEng = document.documentElement.lang === 'en';
+    const currencyStr = isEng ? 'SAR' : 'ريال';
     
     try {
         const q = query(collection(db, "expenses"), where("userId", "==", currentUser.uid));
-        if (window.unsubAnalyticsExpenses) window.unsubAnalyticsExpenses();
+        if (unsubscribeAnalyticsExpenses) unsubscribeAnalyticsExpenses();
 
-        window.unsubAnalyticsExpenses = onSnapshot(q, (snapshot) => {
+        unsubscribeAnalyticsExpenses = onSnapshot(q, (snapshot) => {
             let allExpenses = [];
             snapshot.forEach(doc => allExpenses.push(doc.data()));
 
@@ -572,7 +633,7 @@ function processDriverAnalytics() {
             activeDriverExp.forEach(exp => {
                 let amt = Number(exp.amount) || 0;
                 let cb = Number(exp.cashback) || 0;
-                let shop = exp.shopName || 'غير معروف';
+                let shop = exp.shopName || (isEng ? 'Unknown' : 'غير معروف');
 
                 totalAmt += amt;
                 totalCb += cb;
@@ -581,8 +642,8 @@ function processDriverAnalytics() {
 
             const elAmt = document.getElementById('stat-total-amt');
             if(elAmt) {
-                elAmt.textContent = totalAmt + ' ريال';
-                document.getElementById('stat-total-cb').textContent = totalCb + ' ريال';
+                elAmt.textContent = totalAmt.toFixed(2) + ' ' + currencyStr;
+                document.getElementById('stat-total-cb').textContent = totalCb.toFixed(2) + ' ' + currencyStr;
             }
 
             let sortedShops = Object.keys(shopTotals).sort((a,b) => shopTotals[b] - shopTotals[a]);
@@ -604,9 +665,9 @@ function processDriverAnalytics() {
                 if (activeTimeRange === '3m' || activeTimeRange === '6m') {
                     let d = new Date(date);
                     d.setDate(d.getDate() - d.getDay()); 
-                    groupKey = d.toISOString().split('T')[0] + ' (أسبوع)';
+                    groupKey = d.toISOString().split('T')[0] + (isEng ? ' (Week)' : ' (أسبوع)');
                 } else if (activeTimeRange === '1y' || activeTimeRange === 'all') {
-                    groupKey = date.substring(0, 7) + ' (شهر)'; 
+                    groupKey = date.substring(0, 7) + (isEng ? ' (Month)' : ' (شهر)'); 
                 }
 
                 allTimeKeys.add(groupKey);
@@ -650,7 +711,7 @@ function processDriverAnalytics() {
                 data: {
                     labels: top10Shops,
                     datasets: [{
-                        label: 'المبلغ (ريال)',
+                        label: isEng ? 'Amount' : 'المبلغ (ريال)',
                         data: top10Amounts,
                         backgroundColor: 'rgba(59, 130, 246, 0.8)',
                         borderRadius: 6 
@@ -690,7 +751,7 @@ function processDriverAnalytics() {
                                     let label = context.label || '';
                                     let value = context.parsed || 0;
                                     let percentage = totalAmt > 0 ? ((value / totalAmt) * 100).toFixed(1) : 0;
-                                    return ` ${label}: ${value} ريال (${percentage}%)`;
+                                    return ` ${label}: ${value} ${currencyStr} (${percentage}%)`;
                                 }
                             }
                         }
@@ -729,7 +790,7 @@ function processDriverAnalytics() {
 document.addEventListener('change', (e) => {
     if (e.target && e.target.id === 'driver-card') {
         const otherInput = document.getElementById('driver-card-other');
-        if (e.target.value === 'أخرى') {
+        if (e.target.value === 'أخرى' || e.target.value === 'Other') {
             otherInput.style.display = 'block';
             otherInput.required = true;
         } else {
@@ -743,28 +804,30 @@ document.addEventListener('change', (e) => {
 document.addEventListener('submit', async (e) => {
     if (e.target && e.target.id === 'add-driver-form') {
         e.preventDefault();
+        const isEng = document.documentElement.lang === 'en';
         const name = document.getElementById('driver-name').value.trim();
         const car = document.getElementById('driver-car').value.trim();
         const editId = document.getElementById('edit-driver-id').value;
         let card = document.getElementById('driver-card').value;
-        if (card === 'أخرى') card = document.getElementById('driver-card-other').value.trim();
+        if (card === 'أخرى' || card === 'Other') card = document.getElementById('driver-card-other').value.trim();
         if (!name) return;
 
         const submitBtn = document.getElementById('submit-driver-btn');
-        const originalText = submitBtn.innerHTML;
+        const textSpan = document.getElementById('submit-btn-text');
+        const originalText = textSpan ? textSpan.innerText : (isEng ? "Save" : "حفظ");
         submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
     try {
             if (editId) {
                 await updateDoc(doc(db, "drivers", editId), { name: name, car: car || "", cardType: card || "" });
-                document.getElementById('form-title').textContent = "إضافة سائق جديد";
+                document.getElementById('form-title').textContent = isEng ? "Add New Driver" : "إضافة سائق جديد";
                 document.getElementById('cancel-edit-btn').style.display = 'none';
-                submitBtn.innerHTML = 'تم التحديث ✔';
+                submitBtn.innerHTML = isEng ? 'Updated ✔' : 'تم التحديث ✔';
                 submitBtn.style.background = '#2ecc71';
                 submitBtn.style.borderColor = '#2ecc71';
             } else {
                 await addDoc(collection(db, "drivers"), { userId: currentUser.uid, name: name, car: car || "", cardType: card || "", createdAt: serverTimestamp() });
-                submitBtn.innerHTML = 'تمت الإضافة ✔';
+                submitBtn.innerHTML = isEng ? 'Added ✔' : 'تمت الإضافة ✔';
                 submitBtn.style.background = '#2ecc71';
                 submitBtn.style.borderColor = '#2ecc71';
             }
@@ -772,19 +835,18 @@ document.addEventListener('submit', async (e) => {
             e.target.reset();
             document.getElementById('edit-driver-id').value = "";
             
-            // إرجاع الزر لشكله ولونه الطبيعي بعد ثانيتين
             setTimeout(() => {
-                submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> حفظ';
+                submitBtn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span id="submit-btn-text">${isEng ? 'Save' : 'حفظ'}</span>`;
                 submitBtn.style.background = '';
                 submitBtn.style.borderColor = '';
             }, 2000);
             
         } catch (error) { 
-            submitBtn.innerHTML = 'حدث خطأ ❌';
+            submitBtn.innerHTML = isEng ? 'Error ❌' : 'حدث خطأ ❌';
             submitBtn.style.background = 'var(--danger)';
             submitBtn.style.borderColor = 'var(--danger)';
             setTimeout(() => {
-                submitBtn.innerHTML = originalText;
+                submitBtn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span id="submit-btn-text">${originalText}</span>`;
                 submitBtn.style.background = '';
                 submitBtn.style.borderColor = '';
             }, 2000);
@@ -796,75 +858,123 @@ document.addEventListener('submit', async (e) => {
         const newName = document.getElementById('settings-name-input').value.trim();
         const newEmail = document.getElementById('settings-email-input').value.trim();
         const newPassword = document.getElementById('settings-password-input').value; 
+        if (!newName) return;
         
-        if (!newName || !newEmail) return;
-        const currentEmail = currentUser && currentUser.email ? currentUser.email : '';
+        const saveBtn = document.getElementById('save-settings-btn');
+        const isEng = document.documentElement.lang === 'en';
+        const originalText = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         
-        if (newEmail !== currentEmail && currentEmail !== '') {
-            document.getElementById('settings-form').style.display = 'none';
-            document.getElementById('otp-verification-section').style.display = 'block';
-            const section = document.getElementById('otp-verification-section');
-            section.dataset.newName = newName;
-            section.dataset.newEmail = newEmail;
-            section.dataset.newPassword = newPassword; 
-        } else {
-            const saveBtn = document.getElementById('save-settings-btn');
-            const originalText = saveBtn.innerHTML;
-            saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            
-            try {
-                if (auth.currentUser) {
-                    await updateProfile(auth.currentUser, { displayName: newName });
-                    if (newPassword) await updatePassword(auth.currentUser, newPassword);
+        try {
+            if (auth.currentUser) {
+                await updateProfile(auth.currentUser, { displayName: newName });
+                if (newEmail && newEmail !== auth.currentUser.email) {
+                    await updateEmail(auth.currentUser, newEmail);
                 }
-                document.getElementById('user-name').textContent = newName;
-                saveBtn.innerHTML = 'تم الحفظ ✔';
-                saveBtn.style.background = '#2ecc71';
-                document.getElementById('settings-password-input').value = ''; 
-                setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
-            } catch (error) {
-                Swal.fire({icon: 'error', title: 'تحذير أمني', text: 'لتغيير الرقم السري، يرجى تسجيل الخروج والدخول مجدداً لتأكيد هويتك.'});
-                saveBtn.innerHTML = originalText;
+                if (newPassword) await updatePassword(auth.currentUser, newPassword);
             }
+            document.getElementById('user-name').textContent = newName;
+            saveBtn.innerHTML = isEng ? 'Saved ✔' : 'تم الحفظ ✔';
+            saveBtn.style.background = '#2ecc71';
+            document.getElementById('settings-password-input').value = ''; 
+            setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
+        } catch (error) {
+            Swal.fire({
+                icon: 'error', 
+                title: 'Error', 
+                text: error.code === 'auth/requires-recent-login'
+                    ? 'Please log in again to change email or password.'
+                    : error.message
+            });
+            saveBtn.innerHTML = originalText;
         }
     }
 });
 
 document.addEventListener('click', async (e) => {
-    // === زر التعديل في جدول العمليات (يحول النص لمربع إدخال) ===
+    // === زر التعديل في جدول العمليات ===
+    // === زر إرفاق الفاتورة ===
+    const uploadBtn = e.target.closest('.upload-btn');
+    if (uploadBtn) {
+        const expenseId = uploadBtn.getAttribute('data-id');
+        const isEng = document.documentElement.lang === 'en';
+        
+        // إنشاء زر وهمي مخفي لفتح ملفات الجهاز
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*,application/pdf';
+        
+        fileInput.onchange = async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // تغيير شكل الزر إلى تحميل
+            const originalHtml = uploadBtn.innerHTML;
+            uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            uploadBtn.style.pointerEvents = 'none';
+
+            try {
+                // استدعاء مكتبة Firebase Storage للرفع
+                const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
+                const storage = getStorage();
+                
+                // تحديد مكان حفظ الصورة في فايربيس
+                const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${file.name}`);
+                
+                // رفع الملف
+                await uploadBytes(fileRef, file);
+                const downloadURL = await getDownloadURL(fileRef);
+
+                // ربط رابط الصورة بالعملية في قاعدة البيانات
+                await updateDoc(doc(db, "expenses", expenseId), {
+                    receiptUrl: downloadURL
+                });
+                
+                // الجدول بيتحدث لحاله ويصير الزر أخضر (الفاتورة)
+            } catch (error) {
+                console.error(error);
+                alert(isEng ? 'Upload failed! Ensure Firebase Storage is enabled.' : 'فشل الرفع! تأكد من تفعيل Storage في إعدادات فايربيس.');
+                uploadBtn.innerHTML = originalHtml;
+                uploadBtn.style.pointerEvents = 'auto';
+            }
+        };
+        
+        fileInput.click();
+        return;
+    }
     const editExpBtn = e.target.closest('.edit-expense-btn');
     if (editExpBtn) {
         const id = editExpBtn.getAttribute('data-id');
         const row = document.getElementById(`exp-row-${id}`);
         if (!row) return;
+        const isEng = document.documentElement.lang === 'en';
 
         const shop = row.querySelector('.col-shop').innerText;
         const date = row.querySelector('.col-date').innerText;
         const amount = row.querySelector('.col-amount').getAttribute('data-val');
         const cashback = row.querySelector('.col-cashback').getAttribute('data-val');
 
-        // ستايل موحد لمربعات الإدخال
         const inputStyle = "width: 100%; min-width: 80px; padding: 6px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-base); color: var(--text-primary); outline: none; font-family: inherit;";
 
-        row.querySelector('.col-shop').innerHTML = `<input type="text" class="edit-in-shop" value="${shop}" style="${inputStyle}">`;
-        row.querySelector('.col-date').innerHTML = `<input type="date" class="edit-in-date" value="${date}" style="${inputStyle}">`;
+        row.querySelector('.col-shop').innerHTML = `<input type="text" class="edit-in-shop" value="${shop === 'غير معروف' || shop === 'Unknown' ? '' : shop}" style="${inputStyle}">`;
+        row.querySelector('.col-date').innerHTML = `<input type="date" class="edit-in-date" value="${date === '-' ? '' : date}" style="${inputStyle}">`;
         row.querySelector('.col-amount').innerHTML = `<input type="number" class="edit-in-amount" value="${amount}" style="${inputStyle}">`;
         row.querySelector('.col-cashback').innerHTML = `<input type="number" class="edit-in-cashback" value="${cashback}" style="${inputStyle}">`;
         
         row.querySelector('.col-actions').innerHTML = `
-            <button class="btn-text save-expense-btn" data-id="${id}" style="color: white; font-size: 13px; background: #2ecc71; padding: 6px 12px; border-radius: 6px; margin-left: 5px; font-weight: bold;">حفظ</button>
-            <button class="btn-text cancel-expense-btn" style="color: var(--text-primary); font-size: 13px; background: rgba(130,130,130,0.2); padding: 6px 12px; border-radius: 6px; font-weight: bold;">إلغاء</button>
+            <button class="btn-text save-expense-btn" data-id="${id}" style="color: white; font-size: 13px; background: #2ecc71; padding: 6px 12px; border-radius: 6px; margin-left: 5px; font-weight: bold;">${isEng ? 'Save' : 'حفظ'}</button>
+            <button class="btn-text cancel-expense-btn" style="color: var(--text-primary); font-size: 13px; background: rgba(130,130,130,0.2); padding: 6px 12px; border-radius: 6px; font-weight: bold;">${isEng ? 'Cancel' : 'إلغاء'}</button>
         `;
         return;
     }
 
     // === زر إلغاء تعديل العملية ===
     if (e.target.closest('.cancel-expense-btn')) {
-        fetchUserExpenses(activeDriverId); // إعادة جلب البيانات تلغي التعديل بسهولة
+        fetchUserExpenses(activeDriverId); 
         return;
     }
 
-    // === زر حفظ تعديل العملية ===
+    // === زر حفظ تعديل العملية (بها تصحيح التعليق) ===
     const saveExpBtn = e.target.closest('.save-expense-btn');
     if (saveExpBtn) {
         const id = saveExpBtn.getAttribute('data-id');
@@ -885,60 +995,43 @@ document.addEventListener('click', async (e) => {
                 amount: newAmount,
                 cashback: newCashback
             });
-            // قاعدة البيانات (onSnapshot) بتحدث الجدول تلقائياً بشكل أنيق
+            // قاعدة البيانات (onSnapshot) بتحدث الجدول تلقائياً وتخفي زر الحفظ بمجرد النجاح
         } catch (err) {
-            saveExpBtn.innerHTML = 'خطأ!';
+            saveExpBtn.innerHTML = 'Error!';
             saveExpBtn.style.background = 'var(--danger)';
+            // إخفاء التعليق وإلغاء العملية بعد ثانيتين
             setTimeout(() => fetchUserExpenses(activeDriverId), 2000);
         }
         return;
     }
-// ==========================================
-    // 1. زر إنشاء تقرير PDF (احترافي، ألوان واضحة، وصياغة مالية)
+
+    // ==========================================
+    // 1. زر إنشاء تقرير PDF
     // ==========================================
     if (e.target.closest('#export-pdf-btn')) {
         const btn = e.target.closest('#export-pdf-btn');
+        const isEng = document.documentElement.lang === 'en';
         const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري إصدار التقرير...';
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${isEng ? 'Generating...' : 'جاري إصدار التقرير...'}`;
         
         const totalAmt = document.getElementById('stat-total-amt').innerText;
         const totalCb = document.getElementById('stat-total-cb').innerText;
-        const currentDate = new Date().toLocaleDateString('ar-SA');
-        const isEnglish = document.documentElement.lang === 'en';
+        const currentDate = new Date().toLocaleDateString(isEng ? 'en-US' : 'ar-SA');
 
-        // 1. حفظ ألوان الشارت الأصلية (عشان نرجعها بعدين)
         const originalColor = Chart.defaults.color;
-        
-        // 2. إجبار الشارت على اللون الأسود الداكن عشان يوضح في الـ PDF
         Chart.defaults.color = '#1e293b';
-        if (barChartInstance) { 
-            barChartInstance.options.scales.x.ticks.color = '#1e293b'; 
-            barChartInstance.options.scales.y.ticks.color = '#1e293b'; 
-            barChartInstance.update(); 
-        }
-        if (pieChartInstance) { 
-            pieChartInstance.options.plugins.legend.display = true; // إظهار الأسماء المفقودة
-            pieChartInstance.options.plugins.legend.position = 'bottom';
-            pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; 
-            pieChartInstance.update(); 
-        }
-        if (lineChartInstance) { 
-            lineChartInstance.options.scales.x.ticks.color = '#1e293b'; 
-            lineChartInstance.options.scales.y.ticks.color = '#1e293b'; 
-            lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; 
-            lineChartInstance.update(); 
-        }
+        if (barChartInstance) { barChartInstance.options.scales.x.ticks.color = '#1e293b'; barChartInstance.options.scales.y.ticks.color = '#1e293b'; barChartInstance.update(); }
+        if (pieChartInstance) { pieChartInstance.options.plugins.legend.display = true; pieChartInstance.options.plugins.legend.position = 'bottom'; pieChartInstance.options.plugins.legend.labels.color = '#1e293b'; pieChartInstance.update(); }
+        if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = '#1e293b'; lineChartInstance.options.scales.y.ticks.color = '#1e293b'; lineChartInstance.options.plugins.legend.labels.color = '#1e293b'; lineChartInstance.update(); }
 
-        // نعطي الشارت نص ثانية عشان يتحدث لونه للأسود، ثم نصوره
         setTimeout(() => {
-            // دالة سرية تصور الشارت بخلفية بيضاء إجبارية عشان ما تطلع الأرقام شفافة
             const getChartImage = (chart) => {
                 if (!chart) return '';
                 const canvas = chart.canvas;
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
                 const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.fillStyle = '#ffffff'; // خلفية بيضاء
+                tempCtx.fillStyle = '#ffffff'; 
                 tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
                 tempCtx.drawImage(canvas, 0, 0);
                 return tempCanvas.toDataURL('image/jpeg', 1.0);
@@ -948,7 +1041,6 @@ document.addEventListener('click', async (e) => {
             const pieImg = getChartImage(pieChartInstance);
             const lineImg = getChartImage(lineChartInstance);
 
-            // 3. إرجاع الألوان للوضع الليلي في الموقع بعد التصوير
             Chart.defaults.color = originalColor;
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             const restoreColor = isDark ? '#e2e8f0' : '#1e293b';
@@ -956,73 +1048,83 @@ document.addEventListener('click', async (e) => {
             if (pieChartInstance) { pieChartInstance.options.plugins.legend.labels.color = restoreColor; pieChartInstance.update(); }
             if (lineChartInstance) { lineChartInstance.options.scales.x.ticks.color = restoreColor; lineChartInstance.options.scales.y.ticks.color = restoreColor; lineChartInstance.options.plugins.legend.labels.color = restoreColor; lineChartInstance.update(); }
 
-            // 4. صياغة مالية احترافية بدون خرابيط الـ AI
-            const titleStr = isEnglish ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
-            const dateStr = isEnglish ? 'Date:' : 'تاريخ التقرير:';
-            const totalExpStr = isEnglish ? 'Total Expenses' : 'إجمالي المصروفات';
-            const totalCbStr = isEnglish ? 'Total Cashback' : 'الاسترداد النقدي (Cashback)';
-            const top10Str = isEnglish ? 'Highest Spending Categories' : 'أعلى المتاجر صرفاً';
-            const distStr = isEnglish ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
-            const lineStr = isEnglish ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
+            const titleStr = isEng ? 'Financial Expenses Report' : 'تقرير المصروفات المالي';
+            const dateStr = isEng ? 'Date:' : 'تاريخ التقرير:';
+            const totalExpStr = isEng ? 'Total Expenses' : 'إجمالي المصروفات';
+            const totalCbStr = isEng ? 'Total Cashback' : 'الاسترداد النقدي (Cashback)';
+            const top10Str = isEng ? 'Highest Spending Categories' : 'أعلى المتاجر صرفاً';
+            const distStr = isEng ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
+            const lineStr = isEng ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
 
-            const pdfTemplate = document.createElement('div');
+const pdfTemplate = document.createElement('div');
+            pdfTemplate.style.width = '800px'; // عرض ثابت ومناسب لصفحة A4
+            pdfTemplate.style.background = '#ffffff';
+            pdfTemplate.style.color = '#000000';
+            pdfTemplate.style.fontFamily = 'Arial, sans-serif';
+            pdfTemplate.style.direction = isEng ? 'ltr' : 'rtl';
+            pdfTemplate.style.padding = '30px';
+            
             pdfTemplate.innerHTML = `
-                <div style="font-family: Arial, sans-serif; width: 100%; direction: ${isEnglish ? 'ltr' : 'rtl'}; background: #ffffff; color: #000000;">
-                    
-                    <!-- الصفحة الأولى -->
-                    <div style="padding: 40px; page-break-after: always;">
-                        <div style="border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-end;">
-                            <div>
-                                <h1 style="color: #1e3a8a; margin: 0; font-size: 28px; font-weight: bold;">${titleStr}</h1>
-                                <p style="margin: 5px 0 0 0; font-size: 14px; color: #475569;">${isEnglish ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
-                            </div>
-                            <div style="text-align: ${isEnglish ? 'right' : 'left'};">
-                                <p style="margin: 0; font-size: 14px; color: #000000; font-weight: bold;">${dateStr} ${currentDate}</p>
-                            </div>
-                        </div>
+                <!-- الصفحة الأولى: الهيدر، الكروت، والرسم الأول -->
+                <div style="page-break-after: always; padding-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; margin-bottom: 25px; padding-bottom: 10px;">
+                        <tr>
+                            <td>
+                                <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
+                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">${isEng ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
+                            </td>
+                            <td style="text-align: ${isEng ? 'right' : 'left'}; vertical-align: bottom;">
+                                <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
+                            </td>
+                        </tr>
+                    </table>
 
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 40px; gap: 20px;">
-                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEnglish ? '0' : '5px solid #e74c3c'}; border-left: ${isEnglish ? '5px solid #e74c3c' : '0'}; text-align: center;">
-                                <h3 style="margin: 0 0 10px 0; color: #334155; font-size: 18px;">${totalExpStr}</h3>
-                                <div style="font-size: 28px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
-                            </div>
-                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEnglish ? '0' : '5px solid #2ecc71'}; border-left: ${isEnglish ? '5px solid #2ecc71' : '0'}; text-align: center;">
-                                <h3 style="margin: 0 0 10px 0; color: #334155; font-size: 18px;">${totalCbStr}</h3>
-                                <div style="font-size: 28px; font-weight: bold; color: #15803d;">${totalCb}</div>
-                            </div>
-                        </div>
+                    <!-- الكروت المالية باستخدام جدول لتجنب التداخل -->
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                        <tr>
+                            <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-${isEng ? 'left' : 'right'}: 5px solid #e74c3c; text-align: center;">
+                                <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalExpStr}</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
+                            </td>
+                            <td style="width: 4%;"></td>
+                            <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-${isEng ? 'left' : 'right'}: 5px solid #2ecc71; text-align: center;">
+                                <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalCbStr}</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #15803d;">${totalCb}</div>
+                            </td>
+                        </tr>
+                    </table>
 
-                        <div style="text-align: center; margin-top: 30px;">
-                            <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${top10Str}</h2>
-                            <img src="${barImg}" style="width: 100%; max-height: 450px; object-fit: contain;">
-                        </div>
+                    <div style="text-align: center;">
+                        <h3 style="color: #1e3a8a; margin-bottom: 15px; font-size: 16px;">${top10Str}</h3>
+                        <img src="${barImg}" style="width: 100%; max-height: 320px; object-fit: contain; display: block; margin: 0 auto;">
                     </div>
-                    
-                    <!-- الصفحة الثانية -->
-                    <div style="padding: 40px; page-break-after: always;">
-                        <div style="text-align: center;">
-                            <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${distStr}</h2>
-                            <img src="${pieImg}" style="width: 100%; max-height: 500px; object-fit: contain;">
-                        </div>
-                    </div>
+                </div>
+                
+                <!-- الصفحة الثانية: رسم الدائرة -->
+                <div style="page-break-after: always; padding-top: 20px; text-align: center;">
+                    <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${distStr}</h3>
+                    <img src="${pieImg}" style="width: 85%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
+                </div>
 
-                    <!-- الصفحة الثالثة -->
-                    <div style="padding: 40px;">
-                        <div style="text-align: center;">
-                            <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${lineStr}</h2>
-                            <img src="${lineImg}" style="width: 100%; max-height: 500px; object-fit: contain;">
-                        </div>
-                    </div>
+                <!-- الصفحة الثالثة: الرسم الخطي -->
+                <div style="padding-top: 20px; text-align: center;">
+                    <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${lineStr}</h3>
+                    <img src="${lineImg}" style="width: 100%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
                 </div>
             `;
 
             const opt = {
                 margin:       [10, 0, 15, 0],
-                filename:     isEnglish ? 'Financial_Report.pdf' : 'تقرير_المصروفات.pdf',
+                filename:     isEng ? 'Financial_Report.pdf' : 'تقرير_المصاريف.pdf',
                 image:        { type: 'jpeg', quality: 1 },
-                html2canvas:  { scale: 2, useCORS: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+                html2canvas:  { 
+                scale: 2, 
+                useCORS: true,
+                windowWidth: 1024 
+                },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] } 
+                };
 
             html2pdf().set(opt).from(pdfTemplate).toPdf().get('pdf').then(function (pdf) {
                 const totalPages = pdf.internal.getNumberOfPages();
@@ -1044,8 +1146,8 @@ document.addEventListener('click', async (e) => {
         return;
     }
 
-// ==========================================
-    // 2. زر تغيير اللغة (English / العربية)
+    // ==========================================
+    // 2. زر تغيير اللغة
     // ==========================================
     const langBtn = e.target.closest('#lang-toggle');
     if (langBtn) {
@@ -1053,6 +1155,22 @@ document.addEventListener('click', async (e) => {
         const isAr = currentLang === 'ar';
 
         if (isAr) {
+            document.getElementById('login-welcome-title').textContent = 'Welcome Back';
+document.getElementById('login-welcome-sub').textContent = 'Sign in to access your account';
+document.getElementById('email-login-btn').textContent = 'Login';
+document.getElementById('login-no-account-text').textContent = "Don't have an account?";
+document.getElementById('show-signup').textContent = 'Sign up';
+
+document.getElementById('signup-title-text').textContent = 'Create Account';
+document.getElementById('signup-sub-text').textContent = 'Enter your details to create an account';
+document.getElementById('email-signup-btn').textContent = 'Sign Up';
+document.getElementById('signup-has-account-text').textContent = 'Already have an account?';
+document.getElementById('show-login').textContent = 'Sign in';
+
+document.getElementById('divider-or-text').textContent = 'OR';
+document.getElementById('google-btn-text').textContent = 'Continue with Google';
+            document.getElementById('logo-text-1').textContent = 'Driver Expenses';
+            document.getElementById('logo-text-2').textContent = 'Driver Expenses';
             document.documentElement.lang = 'en'; 
             document.documentElement.dir = 'ltr'; 
             langBtn.textContent = 'ع'; 
@@ -1063,8 +1181,27 @@ document.addEventListener('click', async (e) => {
                 if(el.innerHTML.includes('التحليلات')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> Analytics';
                 if(el.innerHTML.includes('السائقين')) el.innerHTML = '<i class="fa-solid fa-users"></i> Drivers';
             });
-            document.getElementById('logout-btn').textContent = 'Logout';
+            const logoutBtn = document.getElementById('logout-btn');
+            if(logoutBtn) logoutBtn.textContent = 'Logout';
         } else {
+            document.getElementById('logo-text-1').textContent = 'مصاريف السائق';
+document.getElementById('logo-text-2').textContent = 'مصاريف السائق';
+document.getElementById('login-welcome-title').textContent = 'مرحباً بك';
+document.getElementById('login-welcome-sub').textContent = 'سجل دخولك للوصول إلى حسابك';
+document.getElementById('email-login-btn').textContent = 'دخول';
+document.getElementById('login-no-account-text').textContent = 'ليس لديك حساب؟';
+document.getElementById('show-signup').textContent = 'أنشئ حساباً جديداً';
+
+document.getElementById('signup-title-text').textContent = 'حساب جديد';
+document.getElementById('signup-sub-text').textContent = 'أدخل بياناتك لإنشاء حسابك الخاص';
+document.getElementById('email-signup-btn').textContent = 'إنشاء الحساب';
+document.getElementById('signup-has-account-text').textContent = 'لديك حساب بالفعل؟';
+document.getElementById('show-login').textContent = 'سجل دخولك';
+
+document.getElementById('divider-or-text').textContent = 'أو';
+document.getElementById('google-btn-text').textContent = 'المتابعة باستخدام Google';
+            document.getElementById('logo-text-1').textContent = 'مصاريف السائق';
+            document.getElementById('logo-text-2').textContent = 'مصاريف السائق';
             document.documentElement.lang = 'ar'; 
             document.documentElement.dir = 'rtl'; 
             langBtn.textContent = 'EN'; 
@@ -1075,14 +1212,17 @@ document.addEventListener('click', async (e) => {
                 if(el.innerHTML.includes('Analytics')) el.innerHTML = '<i class="fa-solid fa-chart-line"></i> التحليلات';
                 if(el.innerHTML.includes('Drivers')) el.innerHTML = '<i class="fa-solid fa-users"></i> السائقين';
             });
-            document.getElementById('logout-btn').textContent = 'تسجيل خروج';
+            const logoutBtn = document.getElementById('logout-btn');
+            if(logoutBtn) logoutBtn.textContent = 'تسجيل خروج';
         }
         
-        const activeNav = document.querySelector('.nav-item.active').getAttribute('data-target');
-        if(activeNav === 'manage') { document.querySelector('[data-target="manage"]').click(); }
-        else if(activeNav === 'analytics') { document.querySelector('[data-target="analytics"]').click(); }
-        else if(activeNav === 'drivers') { document.querySelector('[data-target="drivers"]').click(); }
-        
+        const activeNavObj = document.querySelector('.nav-item.active');
+        if(activeNavObj) {
+            const activeNav = activeNavObj.getAttribute('data-target');
+            if(activeNav === 'manage') { document.querySelector('[data-target="manage"]').click(); }
+            else if(activeNav === 'analytics') { document.querySelector('[data-target="analytics"]').click(); }
+            else if(activeNav === 'drivers') { document.querySelector('[data-target="drivers"]').click(); }
+        }
         return;
     }
 
@@ -1090,7 +1230,7 @@ document.addEventListener('click', async (e) => {
     const analyticsTabBtn = e.target.closest('.analytics-driver-tab-btn');
     if (analyticsTabBtn) {
         activeAnalyticsDriverId = analyticsTabBtn.getAttribute('data-id');
-        window.fetchAnalyticsData(); 
+        fetchAnalyticsData(); 
         return;
     }
 
@@ -1136,8 +1276,9 @@ document.addEventListener('click', async (e) => {
             cardOther.value = card;
         }
 
-        document.getElementById('form-title').textContent = "تعديل بيانات السائق";
-        document.getElementById('submit-driver-btn').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> تحديث';
+        const isEng = document.documentElement.lang === 'en';
+        document.getElementById('form-title').textContent = isEng ? "Edit Driver Details" : "تعديل بيانات السائق";
+        document.getElementById('submit-driver-btn').innerHTML = `<i class="fa-solid fa-pen-to-square"></i> <span id="submit-btn-text">${isEng ? 'Update' : 'تحديث'}</span>`;
         document.getElementById('cancel-edit-btn').style.display = 'inline-block';
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
@@ -1145,22 +1286,24 @@ document.addEventListener('click', async (e) => {
 
     const cancelEditBtn = e.target.closest('#cancel-edit-btn');
     if (cancelEditBtn) {
+        const isEng = document.documentElement.lang === 'en';
         document.getElementById('add-driver-form').reset();
         document.getElementById('driver-card-other').style.display = 'none';
         document.getElementById('edit-driver-id').value = "";
-        document.getElementById('form-title').textContent = "إضافة سائق جديد";
-        document.getElementById('submit-driver-btn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> حفظ';
+        document.getElementById('form-title').textContent = isEng ? "Add New Driver" : "إضافة سائق جديد";
+        document.getElementById('submit-driver-btn').innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span id="submit-btn-text">${isEng ? 'Save' : 'حفظ'}</span>`;
         cancelEditBtn.style.display = 'none';
         return;
     }
 
-    // 5. الحذف (مع Try Catch)
+    // 5. الحذف (مع الترجمة للمتأكد)
     const deleteBtn = e.target.closest('.delete-btn');
     if (deleteBtn) {
         const id = deleteBtn.getAttribute('data-id');
+        const isEng = document.documentElement.lang === 'en';
         if (!deleteBtn.classList.contains('confirming-delete')) {
             const originalHtml = deleteBtn.innerHTML;
-            deleteBtn.innerHTML = 'متأكد؟';
+            deleteBtn.innerHTML = isEng ? 'Sure?' : 'متأكد؟';
             deleteBtn.style.color = 'white'; deleteBtn.style.background = 'var(--danger)';
             deleteBtn.style.padding = '4px 8px'; deleteBtn.style.borderRadius = '4px';
             deleteBtn.classList.add('confirming-delete');
@@ -1174,7 +1317,7 @@ document.addEventListener('click', async (e) => {
         } else {
             deleteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             try { await deleteDoc(doc(db, "expenses", id)); } 
-            catch (err) { Swal.fire({icon: 'error', title: 'خطأ', text: 'لم يتم الحذف.'}); }
+            catch (err) { Swal.fire({icon: 'error', title: 'Error', text: 'Failed to delete.'}); }
         }
         return;
     }
@@ -1182,9 +1325,10 @@ document.addEventListener('click', async (e) => {
     const deleteDriverBtn = e.target.closest('.delete-driver-btn');
     if (deleteDriverBtn) {
         const id = deleteDriverBtn.getAttribute('data-id');
+        const isEng = document.documentElement.lang === 'en';
         if (!deleteDriverBtn.classList.contains('confirming-delete')) {
             const originalHtml = deleteDriverBtn.innerHTML;
-            deleteDriverBtn.innerHTML = 'متأكد؟';
+            deleteDriverBtn.innerHTML = isEng ? 'Sure?' : 'متأكد؟';
             deleteDriverBtn.style.background = 'var(--danger)'; deleteDriverBtn.style.color = 'white';
             deleteDriverBtn.classList.add('confirming-delete');
             setTimeout(() => {
@@ -1197,7 +1341,7 @@ document.addEventListener('click', async (e) => {
         } else {
             deleteDriverBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             try { await deleteDoc(doc(db, "drivers", id)); } 
-            catch (err) { Swal.fire({icon: 'error', title: 'خطأ', text: 'لم يتم الحذف.'}); }
+            catch (err) { Swal.fire({icon: 'error', title: 'Error', text: 'Failed to delete.'}); }
         }
         return;
     }

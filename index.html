@@ -23,22 +23,22 @@
 
     <div id="login-screen" class="auth-container">
         <div class="auth-card">
-            <div class="logo"><i class="fa-solid fa-money-check-dollar"></i> مصاريف السائق</div>
+            <div class="logo"><i class="fa-solid fa-money-check-dollar"></i> <span id="logo-text-1">مصاريف السائق</span></div>            
             
             <div id="login-form-container">
-                <h2>مرحباً بك</h2>
-                <p>سجل دخولك للوصول إلى حسابك</p>
+                <h2 id="login-welcome-title">مرحباً بك</h2>
+                <p id="login-welcome-sub">سجل دخولك للوصول إلى حسابك</p>
                 <div class="auth-form">
                     <input type="email" id="login-email" class="form-input" placeholder="البريد الإلكتروني">
                     <input type="password" id="login-password" class="form-input" placeholder="كلمة المرور">
                     <button id="email-login-btn" class="btn-primary">دخول</button>
                 </div>
-                <p class="switch-form-text">ليس لديك حساب؟ <span id="show-signup" class="text-link">أنشئ حساباً جديداً</span></p>
+                <p class="switch-form-text"><span id="login-no-account-text">ليس لديك حساب؟</span> <span id="show-signup" class="text-link">أنشئ حساباً جديداً</span></p>
             </div>
 
             <div id="signup-form-container" class="hidden">
-                <h2>حساب جديد</h2>
-                <p>أدخل بياناتك لإنشاء حسابك الخاص</p>
+                <h2 id="signup-title-text">حساب جديد</h2>
+                <p id="signup-sub-text">أدخل بياناتك لإنشاء حسابك الخاص</p>
                 <div class="auth-form">
                     <input type="text" id="signup-name" class="form-input" placeholder="الاسم الكامل">
                     <input type="email" id="signup-email" class="form-input" placeholder="البريد الإلكتروني">
@@ -46,19 +46,19 @@
                     <input type="password" id="signup-password-confirm" class="form-input" placeholder="تأكيد كلمة المرور">
                     <button id="email-signup-btn" class="btn-primary">إنشاء الحساب</button>
                 </div>
-                <p class="switch-form-text">لديك حساب بالفعل؟ <span id="show-login" class="text-link">سجل دخولك</span></p>
+                <p class="switch-form-text"><span id="signup-has-account-text">لديك حساب بالفعل؟</span> <span id="show-login" class="text-link">سجل دخولك</span></p>
             </div>
 
-            <div class="divider"><span>أو</span></div>
+            <div class="divider"><span id="divider-or-text">أو</span></div>
             <button id="google-login-btn" class="btn-google">
-                <i class="fa-brands fa-google"></i> المتابعة باستخدام Google
+                <i class="fa-brands fa-google"></i> <span id="google-btn-text">المتابعة باستخدام Google</span>
             </button>
         </div>
     </div>
 
     <div id="dashboard-screen" class="layout hidden">
         <aside class="sidebar">
-            <div class="logo"><i class="fa-solid fa-money-check-dollar"></i> مصاريف السائق</div>
+            <div class="logo"><i class="fa-solid fa-money-check-dollar"></i> <span id="logo-text-2">مصاريف السائق</span></div>
             <nav class="nav-menu">
                 <button class="nav-item active" data-target="manage"><i class="fa-solid fa-receipt"></i> العمليات</button>
                 <button class="nav-item" data-target="analytics"><i class="fa-solid fa-chart-line"></i> التحليلات</button>

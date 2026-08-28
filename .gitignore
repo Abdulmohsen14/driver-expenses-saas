@@ -1,0 +1,10 @@
+# الأسرار - ممنوعة من الرفع
+telegram-bot/.env
+telegram-bot/serviceAccountKey.json
+*.env
+.env*
+
+# الملفات المؤقتة والاعتماديات
+node_modules/
+*.log
+.DS_Store
