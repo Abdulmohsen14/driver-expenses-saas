@@ -18,20 +18,15 @@ class DatabaseConfig {
 const db = DatabaseConfig.init();
 
 // ============================================================================
-// 🚀 المحرك المحلي المستقل 
+// 🚀 المحرك البرمجي المطور (متعدد اللغات، العملات، والنواقص)
 // ============================================================================
 function smartLocalParser(text) {
     const results = [];
-    const cleanText = text.replace(/الصرف المتبقي.*?\n?/g, '');
+    // تنظيف الأرصدة بأي لغة لمنع الحسابات الخاطئة
+    const cleanText = text.replace(/(?:الصرف المتبقي|الرصيد|Balance|Available).*?\n?/gi, '');
     
-    let dateMatch = cleanText.match(/\d{2}\/\d{2}\/\d{2}/);
-    let txDate = new Date().toISOString().split('T')[0];
-    if (dateMatch) {
-        const parts = dateMatch[0].split('/');
-        if(parts.length === 3) { txDate = `20${parts[2]}-${parts[1]}-${parts[0]}`; }
-    }
-
-    const regex = /(?:مبلغ|بـ)\s*([\d,]+(?:\.\d{1,2})?)\s*(SAR|USD|EUR|ريال|دولار)/gi;
+    // التقاط أي مبلغ يتبعه عملة (3 حروف إنجليزية، أو عملات عربية، أو رموز)
+    const regex = /([\d,]+(?:\.\d{1,2})?)\s*([A-Z]{3}|ريال|دولار|درهم|دينار|\$|€|£)/gi;
     let match;
     
     while ((match = regex.exec(cleanText)) !== null) {
@@ -42,23 +37,33 @@ function smartLocalParser(text) {
         if (currency === 'ريال') currency = 'SAR';
         if (currency === 'دولار') currency = 'USD';
         
-        const start = Math.max(0, match.index - 80);
-        const end = Math.min(cleanText.length, match.index + 120);
+        // أخذ السياق المحيط بالمبلغ لتحليله (عربي وإنجليزي)
+        const start = Math.max(0, match.index - 60);
+        const end = Math.min(cleanText.length, match.index + 80);
         const context = cleanText.substring(start, end);
         
+        // تحديد نوع العملية
         let type = 'purchase';
-        let merchant = 'متجر غير معروف';
-        
-        if (/استرجاع|كاش باك|مكافأة|إلغاء|refund/i.test(context)) {
+        if (/استرجاع|كاش باك|مكافأة|إلغاء|refund|reversal|cashback/i.test(context)) {
             type = 'cashback';
-            merchant = 'استرجاع نقدي';
-        } else {
-            const merchantMatch = context.match(/(?:من|لدى)\s+([^\n]+)/);
-            if (merchantMatch) {
-                merchant = merchantMatch[1].trim();
-                merchant = merchant.split(/(?:إئتمانية|بطاقة|في\s\d|SAR)/)[0].trim();
-            }
         }
+        
+        // استخراج المتجر - إذا لم يجده يتركه فارغاً تماماً
+        let merchant = ""; 
+        const merchantMatch = context.match(/(?:من|لدى|at|from)\s+([a-zA-Z\u0600-\u06FF\s]+)/i);
+        if (merchantMatch && merchantMatch[1]) {
+            merchant = merchantMatch[1].replace(/(?:إئتمانية|بطاقة|في|SAR|USD|card)/gi, '').trim();
+        }
+
+        // استخراج التاريخ الخاص بالعملية
+        let txDate = new Date().toISOString().split('T')[0];
+        const dateMatch = context.match(/\d{2,4}[-/]\d{2}[-/]\d{2,4}/);
+        if (dateMatch) {
+            let dStr = dateMatch[0].replace(/\//g, '-');
+            let parts = dStr.split('-');
+            if (parts.length === 3 && parts[2].length === 2) txDate = `20${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+
         results.push({ type, amount, currency, merchant, date: txDate });
     }
     return results;
@@ -78,64 +83,63 @@ bot.on('text', async (ctx) => {
 
     try {
         const userQuery = await db.collection('users').where('telegramId', '==', ctx.from.id.toString()).get();
-        if (userQuery.empty) return ctx.reply('⚠️ حسابك غير مربوط بالموقع.');
+        if (userQuery.empty) return;
 
+        const userData = userQuery.docs[0].data();
         const userId = userQuery.docs[0].id;
-        const transactions = smartLocalParser(ctx.message.text);
+        
+        // قراءة لغة المستخدم من الموقع (إذا لم تكن محددة يفترض العربية)
+        const userLang = userData.language || 'ar';
+        const msgs = {
+            ar: { success: "✅ تم الإضافة.", choose: "اختر السائق:" },
+            en: { success: "✅ Added successfully.", choose: "Select driver:" }
+        };
 
-        if (transactions.length === 0) return ctx.reply('❌ لم يتم العثور على مبالغ مالية صالحة في الرسالة.');
+        const transactions = smartLocalParser(ctx.message.text);
+        if (transactions.length === 0) return;
 
         const driversQuery = await db.collection('drivers').where('userId', '==', userId).get();
         const drivers = driversQuery.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
-        if (drivers.length === 0) return ctx.reply('⚠️ لا يوجد لديك سائقين مسجلين.');
+        if (drivers.length === 0) return;
 
-        // فصل المشتريات ودمج الكاش باك معها لتظهر في عمود الواجهة
         const purchases = transactions.filter(t => t.type === 'purchase');
         const cashbacks = transactions.filter(t => t.type === 'cashback');
         const totalCashback = cashbacks.reduce((sum, t) => sum + t.amount, 0);
 
         if (purchases.length > 0) {
-            purchases[0].cashback = totalCashback; // دمج الكاش باك في الفاتورة
-            
             if (drivers.length === 1) {
                 const pBatch = db.batch();
                 purchases.forEach(p => {
                     const docRef = db.collection('expenses').doc();
                     pBatch.set(docRef, {
                         userId, driverId: drivers[0].id, shopName: p.merchant,
-                        amount: p.amount, // الرقم صافي بدون SAR
-                        cashback: p.cashback || 0,
-                        date: p.date, status: 'completed', // حرف صغير
-                        type: 'purchase', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
+                        amount: p.amount, cashback: totalCashback || 0,
+                        date: p.date, status: 'completed', // بحرف صغير لإنهاء مشكلة Pending
+                        type: 'purchase', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
                     });
                 });
                 await pBatch.commit();
-                ctx.reply(`✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
+                ctx.reply(msgs[userLang].success);
             } else {
-                let replyText = totalCashback > 0 ? `✅ تم دمج (${totalCashback}) كاش باك.\n\n👇 اختر السائق:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
-                await ctx.reply(replyText);
-                
                 for (const p of purchases) {
+                    p.cashback = totalCashback;
                     const txId = crypto.randomBytes(4).toString('hex');
-                    TransactionCache.set(txId, { userId, transaction: p });
+                    TransactionCache.set(txId, { userId, transaction: p, lang: userLang });
                     const buttons = drivers.map(d => [Markup.button.callback(`🚗 ${d.name}`, `assign_${txId}_${d.id}`)]);
-                    await ctx.reply(`🛒 ${p.merchant}\n💰 ${p.amount} ${p.currency}\n📅 ${p.date}`, Markup.inlineKeyboard(buttons));
+                    await ctx.reply(msgs[userLang].choose, Markup.inlineKeyboard(buttons));
                 }
             }
         } else if (totalCashback > 0) {
-             // في حال إرسال كاش باك فقط بدون مشتريات
              const docRef = db.collection('expenses').doc();
              await docRef.set({
-                 userId, driverId: drivers[0].id, shopName: 'استرجاع نقدي مستقل',
+                 userId, driverId: drivers[0].id, shopName: "",
                  amount: 0, cashback: totalCashback, date: cashbacks[0].date, 
-                 status: 'completed', type: 'cashback', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
+                 status: 'completed', type: 'cashback', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
              });
-             ctx.reply(`✅ تم حفظ (${totalCashback}) كاش باك في النظام.`);
+             ctx.reply(msgs[userLang].success);
         }
-
     } catch (error) {
         console.error("System Error:", error);
-        ctx.reply('❌ حدث فشل داخلي في النظام.');
     }
 });
 
@@ -144,23 +148,25 @@ bot.action(/^assign_([a-z0-9]+)_(.+)$/, async (ctx) => {
         const txId = ctx.match[1];
         const driverId = ctx.match[2];
         const pendingData = TransactionCache.get(txId);
-        
-        if (!pendingData) return ctx.answerCbQuery('⚠️ العملية غير متوفرة أو تمت معالجتها!', { show_alert: true });
+        if (!pendingData) return ctx.answerCbQuery('⚠️', { show_alert: false });
+
+        const userLang = pendingData.lang || 'ar';
+        const msgText = userLang === 'en' ? "✅ Added." : "✅ تم الإضافة.";
 
         const docRef = db.collection('expenses').doc();
         await docRef.set({
             userId: pendingData.userId, driverId: driverId, shopName: pendingData.transaction.merchant,
-            amount: pendingData.transaction.amount, // الرقم صافي
-            cashback: pendingData.transaction.cashback || 0, // إضافة عمود الكاش باك
+            amount: pendingData.transaction.amount, 
+            cashback: pendingData.transaction.cashback || 0, 
             date: pendingData.transaction.date,
-            status: 'completed', // حرف صغير
-            type: 'purchase', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
+            status: 'completed', 
+            type: 'purchase', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
         });
 
         TransactionCache.delete(txId);
-        ctx.editMessageText(`✅ تمت مزامنة العملية مع الموقع بنجاح.`);
+        ctx.editMessageText(msgText);
     } catch (error) {
-        ctx.answerCbQuery('❌ فشل في حفظ البيانات.', { show_alert: true });
+        ctx.answerCbQuery('❌', { show_alert: false });
     }
 });
 
