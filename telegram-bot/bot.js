@@ -18,25 +18,19 @@ class DatabaseConfig {
 const db = DatabaseConfig.init();
 
 // ============================================================================
-// 🚀 المحرك المحلي المستقل (بدون ذكاء اصطناعي - سرعة 0.001 ثانية)
+// 🚀 المحرك المحلي المستقل 
 // ============================================================================
 function smartLocalParser(text) {
     const results = [];
-    
-    // 1. تنظيف سطر الصرف المتبقي بالكامل لمنع أي حسابات خاطئة
     const cleanText = text.replace(/الصرف المتبقي.*?\n?/g, '');
     
-    // 2. سحب التاريخ الصحيح من الرسالة وتحويله (YYYY-MM-DD)
     let dateMatch = cleanText.match(/\d{2}\/\d{2}\/\d{2}/);
     let txDate = new Date().toISOString().split('T')[0];
     if (dateMatch) {
         const parts = dateMatch[0].split('/');
-        if(parts.length === 3) {
-            txDate = `20${parts[2]}-${parts[1]}-${parts[0]}`; 
-        }
+        if(parts.length === 3) { txDate = `20${parts[2]}-${parts[1]}-${parts[0]}`; }
     }
 
-    // 3. البحث فقط عن المبالغ المسبوقة بـ "مبلغ" أو "بـ" لمنع سحب التواريخ
     const regex = /(?:مبلغ|بـ)\s*([\d,]+(?:\.\d{1,2})?)\s*(SAR|USD|EUR|ريال|دولار)/gi;
     let match;
     
@@ -48,7 +42,6 @@ function smartLocalParser(text) {
         if (currency === 'ريال') currency = 'SAR';
         if (currency === 'دولار') currency = 'USD';
         
-        // سحب السياق لتحديد نوع العملية والمتجر
         const start = Math.max(0, match.index - 80);
         const end = Math.min(cleanText.length, match.index + 120);
         const context = cleanText.substring(start, end);
@@ -60,23 +53,17 @@ function smartLocalParser(text) {
             type = 'cashback';
             merchant = 'استرجاع نقدي';
         } else {
-            // سحب اسم المتجر الدقيق الموجود بعد كلمة "من" أو "لدى"
             const merchantMatch = context.match(/(?:من|لدى)\s+([^\n]+)/);
             if (merchantMatch) {
                 merchant = merchantMatch[1].trim();
                 merchant = merchant.split(/(?:إئتمانية|بطاقة|في\s\d|SAR)/)[0].trim();
             }
         }
-        
         results.push({ type, amount, currency, merchant, date: txDate });
     }
-    
     return results;
 }
 
-// ============================================================================
-// إدارة الذاكرة والبوت
-// ============================================================================
 class TransactionCache {
     static cache = new Map();
     static set(id, data) { this.cache.set(id, { ...data, timestamp: Date.now() }); }
@@ -94,54 +81,38 @@ bot.on('text', async (ctx) => {
         if (userQuery.empty) return ctx.reply('⚠️ حسابك غير مربوط بالموقع.');
 
         const userId = userQuery.docs[0].id;
-        
-        // استدعاء المحرك المحلي المباشر
         const transactions = smartLocalParser(ctx.message.text);
 
-        if (transactions.length === 0) {
-            return ctx.reply('❌ لم يتم العثور على مبالغ مالية صالحة في الرسالة.');
-        }
+        if (transactions.length === 0) return ctx.reply('❌ لم يتم العثور على مبالغ مالية صالحة في الرسالة.');
 
         const driversQuery = await db.collection('drivers').where('userId', '==', userId).get();
         const drivers = driversQuery.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
-
         if (drivers.length === 0) return ctx.reply('⚠️ لا يوجد لديك سائقين مسجلين.');
 
-        const batch = db.batch();
-        const purchases = [];
-        let savedCashback = 0;
-
-        transactions.forEach(t => {
-            if (t.type === 'cashback') {
-                const docRef = db.collection('expenses').doc();
-                batch.set(docRef, {
-                    userId, driverId: drivers[0].id, shopName: t.merchant,
-                    amount: `${t.amount} ${t.currency}`, date: t.date, status: 'Completed',
-                    type: 'cashback', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
-                });
-                savedCashback++;
-            } else {
-                purchases.push(t);
-            }
-        });
-
-        if (savedCashback > 0) await batch.commit();
+        // فصل المشتريات ودمج الكاش باك معها لتظهر في عمود الواجهة
+        const purchases = transactions.filter(t => t.type === 'purchase');
+        const cashbacks = transactions.filter(t => t.type === 'cashback');
+        const totalCashback = cashbacks.reduce((sum, t) => sum + t.amount, 0);
 
         if (purchases.length > 0) {
+            purchases[0].cashback = totalCashback; // دمج الكاش باك في الفاتورة
+            
             if (drivers.length === 1) {
                 const pBatch = db.batch();
                 purchases.forEach(p => {
                     const docRef = db.collection('expenses').doc();
                     pBatch.set(docRef, {
                         userId, driverId: drivers[0].id, shopName: p.merchant,
-                        amount: `${p.amount} ${p.currency}`, date: p.date, status: 'Completed',
+                        amount: p.amount, // الرقم صافي بدون SAR
+                        cashback: p.cashback || 0,
+                        date: p.date, status: 'completed', // حرف صغير
                         type: 'purchase', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
                     });
                 });
                 await pBatch.commit();
                 ctx.reply(`✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
             } else {
-                let replyText = savedCashback > 0 ? `✅ تم حفظ (${savedCashback}) كاش باك.\n\n👇 اختر السائق لـ (${purchases.length}) مشتريات:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
+                let replyText = totalCashback > 0 ? `✅ تم دمج (${totalCashback}) كاش باك.\n\n👇 اختر السائق:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
                 await ctx.reply(replyText);
                 
                 for (const p of purchases) {
@@ -151,8 +122,15 @@ bot.on('text', async (ctx) => {
                     await ctx.reply(`🛒 ${p.merchant}\n💰 ${p.amount} ${p.currency}\n📅 ${p.date}`, Markup.inlineKeyboard(buttons));
                 }
             }
-        } else {
-            ctx.reply(`✅ تم حفظ (${savedCashback}) عمليات كاش باك في النظام.`);
+        } else if (totalCashback > 0) {
+             // في حال إرسال كاش باك فقط بدون مشتريات
+             const docRef = db.collection('expenses').doc();
+             await docRef.set({
+                 userId, driverId: drivers[0].id, shopName: 'استرجاع نقدي مستقل',
+                 amount: 0, cashback: totalCashback, date: cashbacks[0].date, 
+                 status: 'completed', type: 'cashback', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
+             });
+             ctx.reply(`✅ تم حفظ (${totalCashback}) كاش باك في النظام.`);
         }
 
     } catch (error) {
@@ -172,8 +150,11 @@ bot.action(/^assign_([a-z0-9]+)_(.+)$/, async (ctx) => {
         const docRef = db.collection('expenses').doc();
         await docRef.set({
             userId: pendingData.userId, driverId: driverId, shopName: pendingData.transaction.merchant,
-            amount: `${pendingData.transaction.amount} ${pendingData.transaction.currency}`, date: pendingData.transaction.date,
-            status: 'Completed', type: 'purchase', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
+            amount: pendingData.transaction.amount, // الرقم صافي
+            cashback: pendingData.transaction.cashback || 0, // إضافة عمود الكاش باك
+            date: pendingData.transaction.date,
+            status: 'completed', // حرف صغير
+            type: 'purchase', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
         });
 
         TransactionCache.delete(txId);
@@ -183,9 +164,6 @@ bot.action(/^assign_([a-z0-9]+)_(.+)$/, async (ctx) => {
     }
 });
 
-// ============================================================================
-// السيرفر الداعم للموقع
-// ============================================================================
 const app = express();
 app.use(express.static(path.join(__dirname, '../')));
 app.get('/', (req, res) => res.sendFile(path.resolve(__dirname, '../index.html')));
