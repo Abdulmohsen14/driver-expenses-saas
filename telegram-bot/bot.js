@@ -21,18 +21,15 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 class AIEngine {
     static async extractFinancialData(text) {
-        const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-pro"];
-        let lastError;
-
         const prompt = `
         أنت محاسب مالي دقيق جداً. اقرأ الرسالة البنكية واستخرج العمليات المالية فقط.
         
         قواعد صارمة جداً:
         1. استخرج (المبالغ المدفوعة للمشتريات) و (المبالغ المسترجعة/الكاش باك).
-        2. استخرج **تاريخ العملية** الموجود في النص (حوله لصيغة YYYY-MM-DD)، إذا لم تجد تاريخاً استخدم تاريخ اليوم.
+        2. استخرج تاريخ العملية (حوله لصيغة YYYY-MM-DD)، إذا لم تجد تاريخاً استخدم تاريخ اليوم.
         3. تجاهل تماماً: الأوقات (مثل 09:21)، أرقام البطاقات، والرصيد المتبقي (مثل الصرف المتبقي 2795.15). لا تعتبرها مبالغ مالية أبداً.
-        4. حدد العملة الصحيحة (SAR, USD، إلخ).
-        5. أرجع النتيجة كمصفوفة JSON (Array) نقية فقط، بدون أي نص إضافي.
+        4. حدد العملة الصحيحة.
+        5. أرجع النتيجة كمصفوفة JSON (Array) نقية فقط.
         
         صيغة الإخراج المطلوبة:
         [
@@ -44,24 +41,16 @@ class AIEngine {
         ${text}
         `;
 
-        for (const modelName of modelsToTry) {
-            try {
-                const model = genAI.getGenerativeModel({ 
-                    model: modelName,
-                    generationConfig: { responseMimeType: "application/json" }
-                });
-                
-                const aiPromise = model.generateContent(prompt);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("AI_Timeout")), 15000));
-                
-                const result = await Promise.race([aiPromise, timeoutPromise]);
-                return this.parseJSON(result.response.text());
-            } catch (err) {
-                lastError = err;
-                console.warn(`[AI Engine] Model ${modelName} failed. Retrying...`);
-            }
-        }
-        throw new Error("فشل الذكاء الاصطناعي في الاستجابة.");
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-1.5-flash",
+            generationConfig: { responseMimeType: "application/json" }
+        });
+        
+        const aiPromise = model.generateContent(prompt);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("AI_Timeout (انتهى الوقت)")), 15000));
+        
+        const result = await Promise.race([aiPromise, timeoutPromise]);
+        return this.parseJSON(result.response.text());
     }
 
     static parseJSON(rawText) {
@@ -107,7 +96,9 @@ bot.on('text', async (ctx) => {
         try {
             transactions = await AIEngine.extractFinancialData(ctx.message.text);
         } catch (aiError) {
-            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ عذراً، السيرفر مزدحم حالياً. كرر المحاولة.');
+            // الخطأ الحقيقي سيظهر لك هنا مباشرة
+            console.error("AI Error:", aiError.message);
+            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `❌ خطأ فني من جوجل: ${aiError.message}`);
         }
 
         if (!transactions || transactions.length === 0) {
@@ -160,7 +151,7 @@ bot.on('text', async (ctx) => {
                     const txId = crypto.randomBytes(4).toString('hex');
                     TransactionCache.set(txId, { userId, transaction: p });
                     const buttons = drivers.map(d => [Markup.button.callback(`🚗 ${d.name}`, `assign_${txId}_${d.id}`)]);
-                    await ctx.reply(`🛒 ${p.merchant}\n💰 ${p.amount} ${p.currency}`, Markup.inlineKeyboard(buttons));
+                    await ctx.reply(`🛒 ${p.merchant}\n💰 ${p.amount} ${p.currency}\n📅 ${p.date}`, Markup.inlineKeyboard(buttons));
                 }
             }
         } else {
