@@ -19,7 +19,6 @@ const db = DatabaseConfig.init();
 
 function smartLocalParser(text) {
     const results = [];
-    // إصلاح الخلل: مسح السطر بالكامل بدقة لمنع قراءة الرصيد المتبقي كعملية شراء
     const cleanText = text.replace(/(?:الصرف المتبقي|الرصيد|Balance|Available)[^\n]*/gi, '');
     
     const regex = /([\d,]+(?:\.\d{1,2})?)\s*([A-Z]{3}|ريال|دولار|درهم|دينار|\$|€|£)/gi;
@@ -59,7 +58,6 @@ function smartLocalParser(text) {
         results.push({ type, amount, currency, merchant, date: txDate });
     }
     
-    // فلترة إضافية لأرقام التواريخ اللي ممكن تنحسب بالغلط
     return results.filter(r => r.amount !== 26 && r.amount !== 2026 && r.amount !== 1 && r.amount !== 8);
 }
 
@@ -107,8 +105,8 @@ bot.on('text', async (ctx) => {
                     pBatch.set(docRef, {
                         userId, driverId: drivers[0].id, shopName: p.merchant,
                         amount: p.amount, cashback: totalCashback || 0,
-                        date: p.date, status: 'completed', 
-                        type: 'purchase', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
+                        date: p.date, status: 'Completed', 
+                        type: 'purchase', receiptUrl: "-", createdAt: FieldValue.serverTimestamp()
                     });
                 });
                 await pBatch.commit();
@@ -120,7 +118,6 @@ bot.on('text', async (ctx) => {
                     TransactionCache.set(txId, { userId, transaction: p, lang: userLang });
                     const buttons = drivers.map(d => [Markup.button.callback(`🚗 ${d.name}`, `assign_${txId}_${d.id}`)]);
                     
-                    // إرجاع تفاصيل الفاتورة عشان تعرف وش جالس تختار
                     await ctx.reply(`🛒 ${p.merchant || '---'}\n💰 ${p.amount} ${p.currency}\n\n${msgs[userLang].choose}`, Markup.inlineKeyboard(buttons));
                 }
             }
@@ -129,7 +126,7 @@ bot.on('text', async (ctx) => {
              await docRef.set({
                  userId, driverId: drivers[0].id, shopName: "",
                  amount: 0, cashback: totalCashback, date: cashbacks[0].date, 
-                 status: 'completed', type: 'cashback', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
+                 status: 'Completed', type: 'cashback', receiptUrl: "-", createdAt: FieldValue.serverTimestamp()
              });
              ctx.reply(msgs[userLang].success);
         }
@@ -154,8 +151,8 @@ bot.action(/^assign_([a-z0-9]+)_(.+)$/, async (ctx) => {
             amount: pendingData.transaction.amount, 
             cashback: pendingData.transaction.cashback || 0, 
             date: pendingData.transaction.date,
-            status: 'completed', 
-            type: 'purchase', receiptUrl: "", createdAt: FieldValue.serverTimestamp()
+            status: 'Completed', 
+            type: 'purchase', receiptUrl: "-", createdAt: FieldValue.serverTimestamp()
         });
 
         TransactionCache.delete(txId);
