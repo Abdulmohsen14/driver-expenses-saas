@@ -6,9 +6,6 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 
-// ============================================================================
-// [1] إعداد قاعدة البيانات
-// ============================================================================
 class DatabaseConfig {
     static init() {
         let serviceAccount;
@@ -20,61 +17,41 @@ class DatabaseConfig {
 }
 const db = DatabaseConfig.init();
 
-// ============================================================================
-// 🧠 [2] المحرك الذكي المستقل (بدون أي API خارجي - سرعة 0.01 ثانية)
-// يفهم العملات، يتجاهل الرصيد المتبقي، يعوض الناقص، ويستخرج المتاجر بدقة
-// ============================================================================
 function smartLocalParser(text) {
     const results = [];
-    
-    // 1. تنظيف ذكي: حذف "الصرف المتبقي" أو "الرصيد" عشان ما ينحسب كمصروف بالغلط
     const cleanText = text.replace(/(?:الصرف المتبقي|الرصيد|Balance|الرصيد المتاح).*?(?:\d+(?:\.\d+)?)/gi, '');
-
-    // 2. البحث عن أي مبالغ مالية في النص مع عملاتها (SAR, USD, ريال، الخ)
     const moneyRegex = /(?:(?:بـ|ب|مبلغ)\s*)?(\d+(?:\.\d{1,2})?)\s*(SAR|USD|EUR|ريال|دولار|ر\.س)?/gi;
     
     let match;
     while ((match = moneyRegex.exec(cleanText)) !== null) {
         const amount = parseFloat(match[1]);
-        if (amount <= 0) continue; // تجاهل الأصفار
+        if (amount <= 0) continue;
 
-        // تحديد العملة بدقة
         let currency = (match[2] || 'SAR').toUpperCase();
         if (currency.includes('ريال') || currency.includes('ر.س')) currency = 'SAR';
         if (currency.includes('دولار')) currency = 'USD';
 
-        // أخذ سياق الكلمة (60 حرف قبل وبعد المبلغ) لفهم نوع العملية
         const start = Math.max(0, match.index - 60);
         const end = Math.min(cleanText.length, match.index + match[0].length + 60);
         const context = cleanText.substring(start, end).replace(/\n/g, ' ');
 
-        // تجاوز الأرقام اللي تشبه المبالغ (مثل آخر 4 أرقام من البطاقة، أو الوقت 09:21)
         if (match[1].length === 4 && !match[2] && context.match(/(?:بطاقة|إئتمانية)/)) continue;
         if (context.slice(match.index - 3, match.index).includes(':')) continue;
 
-        // 3. تحديد نوع العملية (كاش باك أو شراء)
         let type = 'purchase';
         if (/استرجاع|كاش باك|refund|مكافأة|إلغاء/i.test(context)) {
             type = 'cashback';
         }
 
-        // 4. استخراج اسم المتجر بذكاء (يبحث عن كلمة "من" أو "لدى")
         let merchant = type === 'cashback' ? 'استرجاع/مكافأة' : 'متجر غير معروف';
         const merchantMatch = context.match(/(?:من|لدى|في متجر|at)\s+([a-zA-Z\u0600-\u06FF0-9\s]+?)(?=\s+(?:إئتمانية|في|ببطاقة|رقم|SAR|\d|$))/i);
         if (merchantMatch && merchantMatch[1].trim().length > 1) {
             merchant = merchantMatch[1].trim();
         }
 
-        results.push({
-            type,
-            amount,
-            currency,
-            merchant,
-            date: new Date().toISOString().split('T')[0]
-        });
+        results.push({ type, amount, currency, merchant, date: new Date().toISOString().split('T')[0] });
     }
 
-    // 5. فلترة التكرار (لو مسك نفس العملية مرتين بالغلط)
     const unique = [];
     const seen = new Set();
     for (const r of results) {
@@ -84,13 +61,9 @@ function smartLocalParser(text) {
             unique.push(r);
         }
     }
-
     return unique;
 }
 
-// ============================================================================
-// [3] إدارة الذاكرة والبوت
-// ============================================================================
 class TransactionCache {
     static cache = new Map();
     static set(id, data) { this.cache.set(id, { ...data, timestamp: Date.now() }); }
@@ -108,8 +81,6 @@ bot.on('text', async (ctx) => {
         if (userQuery.empty) return ctx.reply('⚠️ حسابك غير مربوط بالموقع.');
 
         const userId = userQuery.docs[0].id;
-        
-        // 🔥 استدعاء المحرك المحلي (سريع جداً، لا يوجد انتظار)
         const transactions = smartLocalParser(ctx.message.text);
 
         if (transactions.length === 0) {
@@ -156,7 +127,6 @@ bot.on('text', async (ctx) => {
                 ctx.reply(`✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
             } else {
                 let replyMsg = savedCashback > 0 ? `✅ تم حفظ (${savedCashback}) كاش باك.\n\n👇 اختر السائق لـ (${purchases.length}) مشتريات:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
-                
                 await ctx.reply(replyMsg);
                 for (const p of purchases) {
                     const txId = crypto.randomBytes(4).toString('hex');
@@ -197,9 +167,6 @@ bot.action(/^assign_([a-z0-9]+)_(.+)$/, async (ctx) => {
     }
 });
 
-// ============================================================================
-// [4] السيرفر الداعم (لإبقاء الموقع يعمل بدون رسالة Cannot GET)
-// ============================================================================
 const app = express();
 app.use(express.static(path.join(__dirname, '../')));
 app.get('/', (req, res) => res.sendFile(path.resolve(__dirname, '../index.html')));
