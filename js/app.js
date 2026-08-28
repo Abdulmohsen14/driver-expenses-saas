@@ -868,6 +868,55 @@ document.addEventListener('submit', async (e) => {
 
 document.addEventListener('click', async (e) => {
     // === زر التعديل في جدول العمليات ===
+    // === زر إرفاق الفاتورة ===
+    const uploadBtn = e.target.closest('.upload-btn');
+    if (uploadBtn) {
+        const expenseId = uploadBtn.getAttribute('data-id');
+        const isEng = document.documentElement.lang === 'en';
+        
+        // إنشاء زر وهمي مخفي لفتح ملفات الجهاز
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*,application/pdf';
+        
+        fileInput.onchange = async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // تغيير شكل الزر إلى تحميل
+            const originalHtml = uploadBtn.innerHTML;
+            uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            uploadBtn.style.pointerEvents = 'none';
+
+            try {
+                // استدعاء مكتبة Firebase Storage للرفع
+                const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
+                const storage = getStorage();
+                
+                // تحديد مكان حفظ الصورة في فايربيس
+                const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${file.name}`);
+                
+                // رفع الملف
+                await uploadBytes(fileRef, file);
+                const downloadURL = await getDownloadURL(fileRef);
+
+                // ربط رابط الصورة بالعملية في قاعدة البيانات
+                await updateDoc(doc(db, "expenses", expenseId), {
+                    receiptUrl: downloadURL
+                });
+                
+                // الجدول بيتحدث لحاله ويصير الزر أخضر (الفاتورة)
+            } catch (error) {
+                console.error(error);
+                alert(isEng ? 'Upload failed! Ensure Firebase Storage is enabled.' : 'فشل الرفع! تأكد من تفعيل Storage في إعدادات فايربيس.');
+                uploadBtn.innerHTML = originalHtml;
+                uploadBtn.style.pointerEvents = 'auto';
+            }
+        };
+        
+        fileInput.click();
+        return;
+    }
     const editExpBtn = e.target.closest('.edit-expense-btn');
     if (editExpBtn) {
         const id = editExpBtn.getAttribute('data-id');
@@ -982,53 +1031,60 @@ document.addEventListener('click', async (e) => {
             const distStr = isEng ? 'Expenses Distribution' : 'التوزيع النسبي للمصروفات';
             const lineStr = isEng ? 'Spending Trends' : 'المؤشر الزمني للمصروفات';
 
-            const pdfTemplate = document.createElement('div');
-            // توسيع العرض إجبارياً ليناسب شاشة كمبيوتر بدل الجوال عند الطباعة
-            pdfTemplate.style.width = '1024px'; 
+const pdfTemplate = document.createElement('div');
+            pdfTemplate.style.width = '800px'; // عرض ثابت ومناسب لصفحة A4
+            pdfTemplate.style.background = '#ffffff';
+            pdfTemplate.style.color = '#000000';
+            pdfTemplate.style.fontFamily = 'Arial, sans-serif';
+            pdfTemplate.style.direction = isEnglish ? 'ltr' : 'rtl';
+            pdfTemplate.style.padding = '30px';
             
             pdfTemplate.innerHTML = `
-                <div style="font-family: Arial, sans-serif; width: 100%; direction: ${isEng ? 'ltr' : 'rtl'}; background: #ffffff; color: #000000;">
-                    <div style="padding: 40px; page-break-after: always;">
-                        <div style="border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: flex-end;">
-                            <div>
-                                <h1 style="color: #1e3a8a; margin: 0; font-size: 28px; font-weight: bold;">${titleStr}</h1>
-                                <p style="margin: 5px 0 0 0; font-size: 14px; color: #475569;">${isEng ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
-                            </div>
-                            <div style="text-align: ${isEng ? 'right' : 'left'};">
-                                <p style="margin: 0; font-size: 14px; color: #000000; font-weight: bold;">${dateStr} ${currentDate}</p>
-                            </div>
-                        </div>
+                <!-- الصفحة الأولى: الهيدر، الكروت، والرسم الأول -->
+                <div style="page-break-after: always; padding-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; margin-bottom: 25px; padding-bottom: 10px;">
+                        <tr>
+                            <td>
+                                <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; font-weight: bold;">${titleStr}</h1>
+                                <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">${isEnglish ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
+                            </td>
+                            <td style="text-align: ${isEnglish ? 'right' : 'left'}; vertical-align: bottom;">
+                                <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
+                            </td>
+                        </tr>
+                    </table>
 
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 40px; gap: 20px;">
-                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEng ? '0' : '5px solid #e74c3c'}; border-left: ${isEng ? '5px solid #e74c3c' : '0'}; text-align: center;">
-                                <h3 style="margin: 0 0 10px 0; color: #334155; font-size: 18px;">${totalExpStr}</h3>
-                                <div style="font-size: 28px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
-                            </div>
-                            <div style="background: #f1f5f9; padding: 25px; border-radius: 8px; flex: 1; border-right: ${isEng ? '0' : '5px solid #2ecc71'}; border-left: ${isEng ? '5px solid #2ecc71' : '0'}; text-align: center;">
-                                <h3 style="margin: 0 0 10px 0; color: #334155; font-size: 18px;">${totalCbStr}</h3>
-                                <div style="font-size: 28px; font-weight: bold; color: #15803d;">${totalCb}</div>
-                            </div>
-                        </div>
+                    <!-- الكروت المالية باستخدام جدول لتجنب التداخل -->
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                        <tr>
+                            <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-${isEnglish ? 'left' : 'right'}: 5px solid #e74c3c; text-align: center;">
+                                <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalExpStr}</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #b91c1c;">${totalAmt}</div>
+                            </td>
+                            <td style="width: 4%;"></td>
+                            <td style="width: 48%; background: #f1f5f9; padding: 20px; border-radius: 8px; border-${isEnglish ? 'left' : 'right'}: 5px solid #2ecc71; text-align: center;">
+                                <div style="color: #334155; font-size: 15px; margin-bottom: 8px; font-weight: bold;">${totalCbStr}</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #15803d;">${totalCb}</div>
+                            </td>
+                        </tr>
+                    </table>
 
-                        <div style="text-align: center; margin-top: 30px;">
-                            <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${top10Str}</h2>
-                            <img src="${barImg}" style="width: 100%; max-height: 450px; object-fit: contain;">
-                        </div>
+                    <div style="text-align: center;">
+                        <h3 style="color: #1e3a8a; margin-bottom: 15px; font-size: 16px;">${top10Str}</h3>
+                        <img src="${barImg}" style="width: 100%; max-height: 320px; object-fit: contain; display: block; margin: 0 auto;">
                     </div>
-                    
-                    <div style="padding: 40px; page-break-after: always;">
-                        <div style="text-align: center;">
-                            <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${distStr}</h2>
-                            <img src="${pieImg}" style="width: 100%; max-height: 500px; object-fit: contain;">
-                        </div>
-                    </div>
+                </div>
+                
+                <!-- الصفحة الثانية: رسم الدائرة -->
+                <div style="page-break-after: always; padding-top: 20px; text-align: center;">
+                    <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${distStr}</h3>
+                    <img src="${pieImg}" style="width: 85%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
+                </div>
 
-                    <div style="padding: 40px;">
-                        <div style="text-align: center;">
-                            <h2 style="color: #1e3a8a; margin-bottom: 20px; font-size: 20px;">${lineStr}</h2>
-                            <img src="${lineImg}" style="width: 100%; max-height: 500px; object-fit: contain;">
-                        </div>
-                    </div>
+                <!-- الصفحة الثالثة: الرسم الخطي -->
+                <div style="padding-top: 20px; text-align: center;">
+                    <h3 style="color: #1e3a8a; margin-bottom: 20px; font-size: 16px;">${lineStr}</h3>
+                    <img src="${lineImg}" style="width: 100%; max-height: 450px; object-fit: contain; display: block; margin: 0 auto;">
                 </div>
             `;
 
@@ -1074,6 +1130,8 @@ document.addEventListener('click', async (e) => {
         const isAr = currentLang === 'ar';
 
         if (isAr) {
+            document.getElementById('logo-text-1').textContent = 'Driver Expenses';
+            document.getElementById('logo-text-2').textContent = 'Driver Expenses';
             document.documentElement.lang = 'en'; 
             document.documentElement.dir = 'ltr'; 
             langBtn.textContent = 'ع'; 
@@ -1087,6 +1145,8 @@ document.addEventListener('click', async (e) => {
             const logoutBtn = document.getElementById('logout-btn');
             if(logoutBtn) logoutBtn.textContent = 'Logout';
         } else {
+            document.getElementById('logo-text-1').textContent = 'مصاريف السائق';
+            document.getElementById('logo-text-2').textContent = 'مصاريف السائق';
             document.documentElement.lang = 'ar'; 
             document.documentElement.dir = 'rtl'; 
             langBtn.textContent = 'EN'; 
