@@ -21,6 +21,10 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 class AIEngine {
     static async extractFinancialData(text) {
+        // قائمة الموديلات: نبدأ بالأحدث، وإذا فشل ننتقل للمستقر (gemini-pro)
+        const modelsToTry = ["gemini-1.5-flash-latest", "gemini-pro"];
+        let lastError;
+
         const prompt = `
         أنت محاسب مالي دقيق جداً. اقرأ الرسالة البنكية واستخرج العمليات المالية فقط.
         
@@ -41,16 +45,26 @@ class AIEngine {
         ${text}
         `;
 
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-1.5-flash",
-            generationConfig: { responseMimeType: "application/json" }
-        });
-        
-        const aiPromise = model.generateContent(prompt);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("AI_Timeout (انتهى الوقت)")), 15000));
-        
-        const result = await Promise.race([aiPromise, timeoutPromise]);
-        return this.parseJSON(result.response.text());
+        for (const modelName of modelsToTry) {
+            try {
+                // الموديلات القديمة لا تدعم إجبار الـ JSON، لذلك نعزلها برمجياً
+                const config = modelName.includes("1.5") ? { responseMimeType: "application/json" } : {};
+                const model = genAI.getGenerativeModel({ 
+                    model: modelName,
+                    generationConfig: config
+                });
+                
+                const aiPromise = model.generateContent(prompt);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("AI_Timeout (انتهى الوقت)")), 15000));
+                
+                const result = await Promise.race([aiPromise, timeoutPromise]);
+                return this.parseJSON(result.response.text());
+            } catch (err) {
+                lastError = err;
+                console.warn(`[AI] فشل موديل ${modelName}، جاري تجربة البديل...`);
+            }
+        }
+        throw new Error(`كل الموديلات فشلت. الخطأ الأخير: ${lastError.message}`);
     }
 
     static parseJSON(rawText) {
@@ -96,7 +110,6 @@ bot.on('text', async (ctx) => {
         try {
             transactions = await AIEngine.extractFinancialData(ctx.message.text);
         } catch (aiError) {
-            // الخطأ الحقيقي سيظهر لك هنا مباشرة
             console.error("AI Error:", aiError.message);
             return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `❌ خطأ فني من جوجل: ${aiError.message}`);
         }
