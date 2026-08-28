@@ -2,6 +2,7 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf'); 
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -16,52 +17,69 @@ class DatabaseConfig {
     }
 }
 const db = DatabaseConfig.init();
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-function smartLocalParser(text) {
-    const results = [];
-    const cleanText = text.replace(/(?:الصرف المتبقي|الرصيد|Balance|الرصيد المتاح).*?(?:\d+(?:\.\d+)?)/gi, '');
-    const moneyRegex = /(?:(?:بـ|ب|مبلغ)\s*)?(\d+(?:\.\d{1,2})?)\s*(SAR|USD|EUR|ريال|دولار|ر\.س)?/gi;
-    
-    let match;
-    while ((match = moneyRegex.exec(cleanText)) !== null) {
-        const amount = parseFloat(match[1]);
-        if (amount <= 0) continue;
+class AIEngine {
+    static async extractFinancialData(text) {
+        const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-pro"];
+        let lastError;
 
-        let currency = (match[2] || 'SAR').toUpperCase();
-        if (currency.includes('ريال') || currency.includes('ر.س')) currency = 'SAR';
-        if (currency.includes('دولار')) currency = 'USD';
+        const prompt = `
+        أنت محاسب مالي دقيق جداً. اقرأ الرسالة البنكية واستخرج العمليات المالية فقط.
+        
+        قواعد صارمة جداً:
+        1. استخرج (المبالغ المدفوعة للمشتريات) و (المبالغ المسترجعة/الكاش باك).
+        2. استخرج **تاريخ العملية** الموجود في النص (حوله لصيغة YYYY-MM-DD)، إذا لم تجد تاريخاً استخدم تاريخ اليوم.
+        3. تجاهل تماماً: الأوقات (مثل 09:21)، أرقام البطاقات، والرصيد المتبقي (مثل الصرف المتبقي 2795.15). لا تعتبرها مبالغ مالية أبداً.
+        4. حدد العملة الصحيحة (SAR, USD، إلخ).
+        5. أرجع النتيجة كمصفوفة JSON (Array) نقية فقط، بدون أي نص إضافي.
+        
+        صيغة الإخراج المطلوبة:
+        [
+          {"type": "purchase", "amount": 5.00, "merchant": "Khairat A", "currency": "SAR", "date": "2026-08-01"},
+          {"type": "cashback", "amount": 0.04, "merchant": "استرجاع نقدي", "currency": "SAR", "date": "2026-08-01"}
+        ]
 
-        const start = Math.max(0, match.index - 60);
-        const end = Math.min(cleanText.length, match.index + match[0].length + 60);
-        const context = cleanText.substring(start, end).replace(/\n/g, ' ');
+        الرسالة:
+        ${text}
+        `;
 
-        if (match[1].length === 4 && !match[2] && context.match(/(?:بطاقة|إئتمانية)/)) continue;
-        if (context.slice(match.index - 3, match.index).includes(':')) continue;
-
-        let type = 'purchase';
-        if (/استرجاع|كاش باك|refund|مكافأة|إلغاء/i.test(context)) {
-            type = 'cashback';
+        for (const modelName of modelsToTry) {
+            try {
+                const model = genAI.getGenerativeModel({ 
+                    model: modelName,
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+                
+                const aiPromise = model.generateContent(prompt);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("AI_Timeout")), 15000));
+                
+                const result = await Promise.race([aiPromise, timeoutPromise]);
+                return this.parseJSON(result.response.text());
+            } catch (err) {
+                lastError = err;
+                console.warn(`[AI Engine] Model ${modelName} failed. Retrying...`);
+            }
         }
-
-        let merchant = type === 'cashback' ? 'استرجاع/مكافأة' : 'متجر غير معروف';
-        const merchantMatch = context.match(/(?:من|لدى|في متجر|at)\s+([a-zA-Z\u0600-\u06FF0-9\s]+?)(?=\s+(?:إئتمانية|في|ببطاقة|رقم|SAR|\d|$))/i);
-        if (merchantMatch && merchantMatch[1].trim().length > 1) {
-            merchant = merchantMatch[1].trim();
-        }
-
-        results.push({ type, amount, currency, merchant, date: new Date().toISOString().split('T')[0] });
+        throw new Error("فشل الذكاء الاصطناعي في الاستجابة.");
     }
 
-    const unique = [];
-    const seen = new Set();
-    for (const r of results) {
-        const key = `${r.amount}-${r.type}-${r.merchant}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            unique.push(r);
+    static parseJSON(rawText) {
+        const match = rawText.match(/\[[\s\S]*\]/);
+        if (!match) return [];
+        try {
+            const data = JSON.parse(match[0]);
+            return data.map(item => ({
+                type: String(item.type).toLowerCase().includes('cash') ? 'cashback' : 'purchase',
+                amount: Math.abs(parseFloat(item.amount)) || 0,
+                merchant: String(item.merchant || 'متجر غير معروف').trim(),
+                currency: String(item.currency || 'SAR').trim(),
+                date: String(item.date || new Date().toISOString().split('T')[0]).trim()
+            })).filter(i => i.amount > 0);
+        } catch (e) {
+            return [];
         }
     }
-    return unique;
 }
 
 class TransactionCache {
@@ -76,21 +94,30 @@ const bot = new Telegraf(process.env.BOT_TOKEN || '8927972087:AAGt8Y1x9tKDQUy3ko
 bot.on('text', async (ctx) => {
     if (ctx.message.text.startsWith('/start')) return;
 
+    let statusMsg;
+    try { statusMsg = await ctx.reply('🧠 جاري التحليل الذكي للرسالة...'); } catch (e) { return; }
+
     try {
         const userQuery = await db.collection('users').where('telegramId', '==', ctx.from.id.toString()).get();
-        if (userQuery.empty) return ctx.reply('⚠️ حسابك غير مربوط بالموقع.');
+        if (userQuery.empty) return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '⚠️ حسابك غير مربوط بالموقع.');
 
         const userId = userQuery.docs[0].id;
-        const transactions = smartLocalParser(ctx.message.text);
+        
+        let transactions;
+        try {
+            transactions = await AIEngine.extractFinancialData(ctx.message.text);
+        } catch (aiError) {
+            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ عذراً، السيرفر مزدحم حالياً. كرر المحاولة.');
+        }
 
-        if (transactions.length === 0) {
-            return ctx.reply('❌ لم يتم العثور على مبالغ مالية صالحة في الرسالة.');
+        if (!transactions || transactions.length === 0) {
+            return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ لم يتم العثور على عمليات مالية مدفوعة في الرسالة.');
         }
 
         const driversQuery = await db.collection('drivers').where('userId', '==', userId).get();
         const drivers = driversQuery.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
 
-        if (drivers.length === 0) return ctx.reply('⚠️ لا يوجد لديك سائقين مسجلين.');
+        if (drivers.length === 0) return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '⚠️ لا يوجد لديك سائقين مسجلين.');
 
         const batch = db.batch();
         const purchases = [];
@@ -100,7 +127,7 @@ bot.on('text', async (ctx) => {
             if (t.type === 'cashback') {
                 const docRef = db.collection('expenses').doc();
                 batch.set(docRef, {
-                    userId, driverId: drivers[0].id, shopName: t.merchant,
+                    userId, driverId: drivers[0].id, shopName: `[استرجاع] ${t.merchant}`,
                     amount: `${t.amount} ${t.currency}`, date: t.date, status: 'Completed',
                     type: 'cashback', receiptUrl: null, createdAt: FieldValue.serverTimestamp()
                 });
@@ -124,24 +151,25 @@ bot.on('text', async (ctx) => {
                     });
                 });
                 await pBatch.commit();
-                ctx.reply(`✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `✅ تم تسجيل (${purchases.length}) عمليات للسائق ${drivers[0].name}`);
             } else {
-                let replyMsg = savedCashback > 0 ? `✅ تم حفظ (${savedCashback}) كاش باك.\n\n👇 اختر السائق لـ (${purchases.length}) مشتريات:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
-                await ctx.reply(replyMsg);
+                let replyText = savedCashback > 0 ? `✅ تم حفظ (${savedCashback}) كاش باك.\n\n👇 اختر السائق لـ (${purchases.length}) مشتريات:` : `👇 تم رصد (${purchases.length}) عمليات. اختر السائق:`;
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, replyText);
+                
                 for (const p of purchases) {
                     const txId = crypto.randomBytes(4).toString('hex');
                     TransactionCache.set(txId, { userId, transaction: p });
                     const buttons = drivers.map(d => [Markup.button.callback(`🚗 ${d.name}`, `assign_${txId}_${d.id}`)]);
-                    await ctx.reply(`🛒 المتجر: ${p.merchant}\n💰 المبلغ: ${p.amount} ${p.currency}`, Markup.inlineKeyboard(buttons));
+                    await ctx.reply(`🛒 ${p.merchant}\n💰 ${p.amount} ${p.currency}`, Markup.inlineKeyboard(buttons));
                 }
             }
         } else {
-            ctx.reply(`✅ تم حفظ (${savedCashback}) عمليات كاش باك في النظام.`);
+            ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `✅ تم حفظ (${savedCashback}) عمليات كاش باك في النظام.`);
         }
 
     } catch (error) {
         console.error("System Error:", error);
-        ctx.reply('❌ حدث فشل داخلي في النظام.');
+        ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ حدث فشل داخلي في النظام.');
     }
 });
 
