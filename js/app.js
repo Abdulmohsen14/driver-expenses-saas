@@ -220,14 +220,32 @@ function renderDashboard() {
     const t_receipt = isEng ? "Receipt" : "الفاتورة";
     const t_action = isEng ? "Action" : "إجراء";
     const t_emptyMsg = isEng ? "Please add and select a driver to view expenses." : "الرجاء إضافة واختيار سائق لعرض عملياته.";
+    const t_sortLabel = isEng ? "Sort:" : "ترتيب:";
+    const t_sortNewest = isEng ? "Newest" : "الأحدث";
+    const t_sortDate = isEng ? "By date" : "حسب التاريخ";
+    const t_sortShop = isEng ? "By store name" : "حسب اسم المتجر";
+    const t_sortReceipt = isEng ? "Receipts on top" : "الفاتورة أولاً";
+    const t_sortLow = isEng ? "Lowest amount" : "الأقل سعراً";
+    const t_sortHigh = isEng ? "Highest amount" : "الأعلى سعراً";
 
     contentArea.innerHTML = `
         <div id="dashboard-driver-tabs" style="display: flex; gap: 10px; margin-bottom: 25px; overflow-x: auto; padding-bottom: 5px;">
             <span style="color: var(--text-muted); font-size: 13px;">${t_loadingDrivers}</span>
         </div>
 
-        <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${t_history}</h3>
+        <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${t_history}</h3>
+                <label for="expenses-sort" style="color: var(--text-muted); font-size: 13px;">${t_sortLabel}</label>
+                <select id="expenses-sort" style="background: var(--bg-base); border: 1px solid var(--border-color); color: var(--text-primary); padding: 7px 12px; border-radius: 8px; font-size: 13px; outline: none; cursor: pointer;">
+                    <option value="newest">${t_sortNewest}</option>
+                    <option value="amount-asc">${t_sortLow}</option>
+                    <option value="amount-desc">${t_sortHigh}</option>
+                    <option value="date">${t_sortDate}</option>
+                    <option value="receipt">${t_sortReceipt}</option>
+                    <option value="shop">${t_sortShop}</option>
+                </select>
+            </div>
             <button id="dynamic-telegram-btn" class="btn-primary" style="flex: none; width: auto; font-size: 13px; padding: 8px 15px; font-weight:bold;">
                 ${t_btnCheck}
             </button>
@@ -302,6 +320,9 @@ function fetchDashboardDrivers() {
     }
 }
 
+let activeExpenseSort = 'newest';
+let expensesCache = [];
+
 function fetchUserExpenses(driverId) {
     if (!driverId) return;
     if (unsubscribeExpenses) unsubscribeExpenses();
@@ -309,65 +330,179 @@ function fetchUserExpenses(driverId) {
     try {
         const q = query(collection(db, "expenses"), where("userId", "==", currentUser.uid), where("driverId", "==", driverId));
         const tbody = document.getElementById('expenses-tbody');
-        const isEng = document.documentElement.lang === 'en';
 
         unsubscribeExpenses = onSnapshot(q, (snapshot) => {
             if (!tbody) return;
-            tbody.innerHTML = ''; 
             
             if (snapshot.empty) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">${isEng ? "No operations recorded for this driver." : "لا توجد عمليات مسجلة لهذا السائق."}</td></tr>`;
+                expensesCache = [];
+                renderExpensesTable();
                 return;
             }
 
             let expensesArray = [];
             snapshot.forEach((docSnap) => expensesArray.push({ id: docSnap.id, ...docSnap.data() }));
-            
-            expensesArray.sort((a, b) => {
+            expensesCache = expensesArray;
+
+            renderExpensesTable();
+        });
+    } catch(err) {}
+}
+
+function renderExpensesTable() {
+    const tbody = document.getElementById('expenses-tbody');
+    if (!tbody) return;
+    const isEng = document.documentElement.lang === 'en';
+    const currencyStr = isEng ? 'SAR' : 'ريال';
+    const list = sortExpenses(expensesCache);
+
+    if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">${isEng ? "No operations recorded for this driver." : "لا توجد عمليات مسجلة لهذا السائق."}</td></tr>`;
+        return;
+    }
+
+    const rows = list.map((data) => {
+        const id = data.id;
+        const hasReceipt = data.receiptUrl && data.receiptUrl !== '-' && data.receiptUrl.toLowerCase() !== 'pending';
+        const isCompleted = data.status && data.status.toLowerCase() === 'completed';
+        const statusColor = isCompleted ? '#10b981' : '#eab308';
+        const statusText = isEng ? (isCompleted ? "Completed" : "Pending") : (isCompleted ? "مكتملة" : "معلقة");
+        const statusBadge = `<span style="color: ${statusColor}">●</span> ${statusText}`;
+
+        const receiptBadge = hasReceipt
+            ? `<button class="btn-text receipt-view-btn" data-path="${encodeURIComponent(receiptPathFromUrl(data.receiptUrl))}" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; cursor: pointer;"><i class="fa-solid fa-check"></i> ${isEng ? 'Receipt' : 'الفاتورة'}</button>`
+            : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> ${isEng ? 'Attach' : 'إرفاق'}</button>`;
+
+        return `
+            <tr id="exp-row-${id}" style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
+                <td class="col-shop" style="padding: 16px; font-weight: 500;">${data.shopName || (isEng ? 'Unknown' : 'غير معروف')}</td>
+                <td class="col-date" style="padding: 16px; color: var(--text-muted); font-size: 14px;" dir="ltr">${expenseDateStr(data) || '-'}</td>
+                <td class="col-amount" style="padding: 16px;" data-val="${data.amount || 0}">${data.amount || 0} ${currencyStr}</td>
+                <td class="col-cashback" style="padding: 16px; color: var(--success);" data-val="${data.cashback || 0}">${data.cashback > 0 ? data.cashback + ' ' + currencyStr : '-'}</td>
+                <td class="col-status" style="padding: 16px; font-weight: 600;">
+                    ${statusBadge}
+                </td>
+                <td style="padding: 16px;">${receiptBadge}</td>
+                <td class="col-actions" style="padding: 16px; white-space: nowrap;">
+                    <button class="btn-text edit-expense-btn" data-id="${id}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 10px; border-radius: 6px; margin-left: 5px;" title="${isEng ? 'Edit' : 'تعديل'}"><i class="fa-solid fa-pen"></i></button>
+                    <button class="btn-text delete-btn" data-id="${id}" style="color: var(--danger); font-size: 15px; background: rgba(231, 76, 60, 0.1); padding: 6px 10px; border-radius: 6px;" title="${isEng ? 'Delete' : 'حذف'}"><i class="fa-solid fa-trash"></i></button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    tbody.innerHTML = rows;
+}
+
+function sortExpenses(arr) {
+    const copy = (arr || []).slice();
+    const cmpDate = (a, b) => (expenseDateStr(b) || '').localeCompare(expenseDateStr(a) || '');
+    const isReceipt = (x) => x.receiptUrl && x.receiptUrl !== '-' && x.receiptUrl.toLowerCase() !== 'pending';
+
+    switch (activeExpenseSort) {
+        case 'amount-asc':
+            copy.sort((a, b) => (Number(a.amount) || 0) - (Number(b.amount) || 0));
+            break;
+        case 'amount-desc':
+            copy.sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0));
+            break;
+        case 'date':
+            copy.sort(cmpDate);
+            break;
+        case 'receipt':
+            copy.sort((a, b) => {
+                const ha = isReceipt(a) ? 0 : 1;
+                const hb = isReceipt(b) ? 0 : 1;
+                if (ha !== hb) return ha - hb;
+                return cmpDate(a, b);
+            });
+            break;
+        case 'shop':
+            copy.sort((a, b) => {
+                const c = (a.shopName || '').localeCompare(b.shopName || '', 'ar');
+                return c !== 0 ? c : cmpDate(a, b);
+            });
+            break;
+        default:
+            copy.sort((a, b) => {
                 const timeA = (a.createdAt && a.createdAt.seconds) ? a.createdAt.seconds : 0;
                 const timeB = (b.createdAt && b.createdAt.seconds) ? b.createdAt.seconds : 0;
                 return timeB - timeA;
             });
+    }
+    return copy;
+}
 
-            expensesArray.forEach((data) => {
-                const id = data.id;
-                const t_currency = isEng ? "SAR" : "ريال";
-                
-                // --- إصلاح مشكلة الفاتورة (علامة الناقص) واللون الأصفر ---
-                // نعتبر أن الفاتورة غير موجودة إذا كانت قيمتها فارغة أو "-" أو "pending"
-                const hasReceipt = data.receiptUrl && data.receiptUrl !== '-' && data.receiptUrl.toLowerCase() !== 'pending';
-                
-                // توحيد قراءة الحالة لتكون Case-Insensitive (سواء Completed أو completed)
-                const isCompleted = data.status && data.status.toLowerCase() === 'completed';
-                
-                // تحديد اللون: أخضر إذا كانت مكتملة، أصفر لغير ذلك
-                const statusColor = isCompleted ? '#10b981' : '#eab308';
-                const statusText = isEng ? (isCompleted ? "Completed" : "Pending") : (isCompleted ? "مكتملة" : "معلقة");
-                const statusBadge = `<span style="color: ${statusColor}">●</span> ${statusText}`;
-                
-                const receiptBadge = hasReceipt 
-                    ? `<a href="${data.receiptUrl}" target="_blank" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none; display: inline-block;"><i class="fa-solid fa-check"></i> ${isEng ? 'Receipt' : 'الفاتورة'}</a>` 
-                    : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> ${isEng ? 'Attach' : 'إرفاق'}</button>`;
-                    
-                tbody.innerHTML += `
-                    <tr id="exp-row-${id}" style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
-                        <td class="col-shop" style="padding: 16px; font-weight: 500;">${data.shopName || (isEng ? 'Unknown' : 'غير معروف')}</td>
-                        <td class="col-date" style="padding: 16px; color: var(--text-muted); font-size: 14px;" dir="ltr">${data.date || '-'}</td>
-                        <td class="col-amount" style="padding: 16px;" data-val="${data.amount || 0}">${data.amount || 0} ${t_currency}</td>
-                        <td class="col-cashback" style="padding: 16px; color: var(--success);" data-val="${data.cashback || 0}">${data.cashback > 0 ? data.cashback + ' ' + t_currency : '-'}</td>
-                        <td class="col-status" style="padding: 16px; font-weight: 600;">
-                            ${statusBadge}
-                        </td>
-                        <td style="padding: 16px;">${receiptBadge}</td>
-                        <td class="col-actions" style="padding: 16px; white-space: nowrap;">
-                            <button class="btn-text edit-expense-btn" data-id="${id}" style="color: var(--primary-accent); font-size: 15px; background: rgba(59, 130, 246, 0.1); padding: 6px 10px; border-radius: 6px; margin-left: 5px;" title="${isEng ? 'Edit' : 'تعديل'}"><i class="fa-solid fa-pen"></i></button>
-                            <button class="btn-text delete-btn" data-id="${id}" style="color: var(--danger); font-size: 15px; background: rgba(231, 76, 60, 0.1); padding: 6px 10px; border-radius: 6px;" title="${isEng ? 'Delete' : 'حذف'}"><i class="fa-solid fa-trash"></i></button>
-                        </td>
-                    </tr>
-                `;
-            });
-        });
-    } catch(err) {}
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function expenseDateStr(exp) {
+    const v = exp && exp.date;
+    if (!v) return '';
+    if (typeof v === 'string') {
+        const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+        const local = v.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        if (local) return local[3] + '-' + pad2(local[2]) + '-' + pad2(local[1]);
+        return v;
+    }
+    let d = v;
+    if (v.toDate) d = v.toDate();
+    if (d instanceof Date && !isNaN(d.getTime())) {
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
+    return '';
+}
+
+function receiptPathFromUrl(url) {
+    if (!url) return '';
+    if (!/^https?:/.test(url)) return url;
+    try {
+        const u = new URL(url);
+        const idx = u.pathname.lastIndexOf('/o/');
+        if (idx !== -1) return decodeURIComponent(u.pathname.substring(idx + 3));
+    } catch (err) {}
+    return url;
+}
+
+function showReceiptModal(path, isEng) {
+    Swal.fire({
+        title: isEng ? 'Receipt' : 'الفاتورة',
+        html: '<div style="text-align: center; padding: 25px 10px;"><i class="fa-solid fa-spinner fa-spin" style="font-size: 32px; color: var(--primary-accent);"></i><br><br><span style="color: var(--text-muted);">' + (isEng ? 'Loading receipt...' : 'جاري تحميل الفاتورة...') + '</span></div>',
+        confirmButtonText: isEng ? 'Close' : 'إغلاق',
+        didOpen: async (modalEl) => {
+            try {
+                let freshUrl = path;
+                if (path && !/^https?:/.test(path)) {
+                    const { getStorage, ref, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
+                    freshUrl = await getDownloadURL(ref(getStorage(), path));
+                }
+                if (!freshUrl) throw new Error('NO_URL');
+
+                const img = new Image();
+                img.onload = () => {
+                    const container = modalEl.querySelector('.swal2-html-container');
+                    if (!container) return;
+                    container.innerHTML =
+                        '<div style="text-align: center;">' +
+                            '<img src="' + freshUrl + '" style="max-width: 100%; max-height: 480px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);" alt="Receipt">' +
+                            '<br><br>' +
+                            '<a href="' + freshUrl + '" target="_blank" rel="noopener" style="display: inline-block; background: var(--primary-accent); color: #fff; padding: 8px 18px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600;">' + (isEng ? 'Open / Download' : 'فتح / تحميل الصورة') + '</a>' +
+                        '</div>';
+                };
+                img.onerror = () => {
+                    const container = modalEl.querySelector('.swal2-html-container');
+                    if (!container) return;
+                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);"><i class="fa-solid fa-circle-exclamation" style="font-size: 34px;"></i><br><br><b>' + (isEng ? 'Receipt file not found' : 'الفاتورة غير متوفرة') + '</b><br><span style="color: var(--text-muted); font-size: 13px;">' + (isEng ? 'The file may have been deleted or moved.' : 'قد يكون الملف محذوفاً أو غير موجود في Storage.') + '</span></div>';
+                };
+                img.src = freshUrl;
+            } catch (err) {
+                console.error(err);
+                const container = modalEl.querySelector('.swal2-html-container');
+                if (!container) return;
+                container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);"><i class="fa-solid fa-circle-exclamation" style="font-size: 34px;"></i><br><br><b>' + (isEng ? 'Could not load receipt' : 'تعذر تحميل الفاتورة') + '</b><br><span style="color: var(--text-muted); font-size: 13px;">' + (isEng ? 'Check your internet connection and the Firebase Storage rules.' : 'تأكد من اتصالك بالإنترنت ومن قواعد Firebase Storage.') + '</span></div>';
+            }
+        }
+    });
 }
 
 // ==========================================
@@ -655,6 +790,13 @@ function fetchAnalyticsData() {
     } catch(err) {}
 }
 
+function timeRangeStartDate() {
+    const now = new Date();
+    if (activeTimeRange === 'all') return new Date(2000, 0, 1);
+    const months = { '1m': 1, '3m': 3, '6m': 6, '1y': 12 }[activeTimeRange] || 1;
+    return new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+}
+
 function processDriverAnalytics() {
     if (globalDriversList.length === 0) return;
     const isEng = document.documentElement.lang === 'en';
@@ -668,15 +810,12 @@ function processDriverAnalytics() {
             let allExpenses = [];
             snapshot.forEach(doc => allExpenses.push(doc.data()));
 
-            let startDate = new Date();
-            if (activeTimeRange === '1m') startDate.setMonth(startDate.getMonth() - 1);
-            else if (activeTimeRange === '3m') startDate.setMonth(startDate.getMonth() - 3);
-            else if (activeTimeRange === '6m') startDate.setMonth(startDate.getMonth() - 6);
-            else if (activeTimeRange === '1y') startDate.setFullYear(startDate.getFullYear() - 1);
-            else if (activeTimeRange === 'all') startDate = new Date('2000-01-01');
-
-            let startDateStr = startDate.toISOString().split('T')[0];
-            let timeFilteredExp = allExpenses.filter(exp => exp.date && exp.date >= startDateStr);
+            const sd = timeRangeStartDate();
+            const startDateStr = sd.getFullYear() + '-' + pad2(sd.getMonth() + 1) + '-' + pad2(sd.getDate());
+            let timeFilteredExp = allExpenses.filter(exp => {
+                const d = expenseDateStr(exp);
+                return d !== '' && d >= startDateStr;
+            });
 
             let activeDriverExp = timeFilteredExp.filter(exp => exp.driverId === activeAnalyticsDriverId);
             
@@ -712,11 +851,11 @@ function processDriverAnalytics() {
 
             timeFilteredExp.forEach(exp => {
                 let amt = Number(exp.amount) || 0;
-                let date = exp.date;
+                let date = expenseDateStr(exp);
                 let groupKey = date;
 
                 if (activeTimeRange === '3m' || activeTimeRange === '6m') {
-                    let d = new Date(date);
+                    let d = new Date(date + 'T00:00:00');
                     d.setDate(d.getDate() - d.getDay()); 
                     groupKey = d.toISOString().split('T')[0] + (isEng ? ' (Week)' : ' (أسبوع)');
                 } else if (activeTimeRange === '1y' || activeTimeRange === 'all') {
@@ -841,6 +980,11 @@ function processDriverAnalytics() {
 // 8. معالجة الأحداث والنماذج
 // ==========================================
 document.addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'expenses-sort') {
+        activeExpenseSort = e.target.value;
+        renderExpensesTable();
+        return;
+    }
     if (e.target && e.target.id === 'driver-card') {
         const otherInput = document.getElementById('driver-card-other');
         if (e.target.value === 'أخرى' || e.target.value === 'Other') {
@@ -945,7 +1089,15 @@ document.addEventListener('submit', async (e) => {
 });
 
 document.addEventListener('click', async (e) => {
-    // === زر التعديل في جدول العمليات ===
+    // === زر عرض الفاتورة ===
+    const receiptBtn = e.target.closest('.receipt-view-btn');
+    if (receiptBtn) {
+        const isEng = document.documentElement.lang === 'en';
+        const path = decodeURIComponent(receiptBtn.getAttribute('data-path') || '');
+        showReceiptModal(path, isEng);
+        return;
+    }
+
     // === زر إرفاق الفاتورة ===
     const uploadBtn = e.target.closest('.upload-btn');
     if (uploadBtn) {
@@ -971,8 +1123,9 @@ document.addEventListener('click', async (e) => {
                 const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
                 const storage = getStorage();
                 
-                // تحديد مكان حفظ الصورة في فايربيس
-                const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${file.name}`);
+                // تحديد مكان حفظ الصورة في فايربيس (تنظيف اسم الملف لتجنب كسر الرابط)
+                const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, '_');
+                const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${safeName}`);
                 
                 // رفع الملف
                 await uploadBytes(fileRef, file);
@@ -986,7 +1139,14 @@ document.addEventListener('click', async (e) => {
                 // الجدول بيتحدث لحاله ويصير الزر أخضر (الفاتورة)
             } catch (error) {
                 console.error(error);
-                alert(isEng ? 'Upload failed! Ensure Firebase Storage is enabled.' : 'فشل الرفع! تأكد من تفعيل Storage في إعدادات فايربيس.');
+                const errCode = error && error.code ? ' (' + error.code + ')' : '';
+                Swal.fire({
+                    icon: 'error',
+                    title: isEng ? 'Upload failed' : 'فشل الرفع',
+                    text: (isEng
+                        ? 'Could not upload the receipt. Check Firebase Storage rules: open Firebase Console > Storage > Rules and allow "allow read, write: if request.auth != null".'
+                        : 'تعذر رفع الفاتورة. تأكد من تفعيل Storage في فايربيس، ومن أن قواعد Storage تسمح برفع الملفات، ثم أعد المحاولة.') + errCode
+                });
                 uploadBtn.innerHTML = originalHtml;
                 uploadBtn.style.pointerEvents = 'auto';
             }
