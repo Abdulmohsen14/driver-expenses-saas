@@ -464,6 +464,33 @@ function receiptPathFromUrl(url) {
     return url;
 }
 
+function compressImage(file, maxSize = 1000, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('READ_FAIL'));
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('IMG_LOAD_FAIL'));
+            img.onload = () => {
+                let width = img.naturalWidth, height = img.naturalHeight;
+                const scale = Math.min(1, maxSize / Math.max(width, height));
+                width = Math.max(1, Math.round(width * scale));
+                height = Math.max(1, Math.round(height * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, width, height);
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
 function showReceiptModal(path, isEng) {
     Swal.fire({
         title: isEng ? 'Receipt' : 'الفاتورة',
@@ -472,7 +499,9 @@ function showReceiptModal(path, isEng) {
         didOpen: async (modalEl) => {
             try {
                 let freshUrl = path;
-                if (path && !/^https?:/.test(path)) {
+                if (path && /^data:/.test(path)) {
+                    freshUrl = path;
+                } else if (path && !/^https?:/.test(path)) {
                     const { getStorage, ref, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
                     freshUrl = await getDownloadURL(ref(getStorage(), path));
                 }
@@ -1139,6 +1168,22 @@ document.addEventListener('click', async (e) => {
                 // الجدول بيتحدث لحاله ويصير الزر أخضر (الفاتورة)
             } catch (error) {
                 console.error(error);
+                // محاولة احتياطية: ضغط الصورة وحفظها داخل حسابك مباشرة
+                // (تعمل حتى لو كانت صلاحيات Storage غير مفعلة)
+                let fallbackSaved = false;
+                if (file && file.type && file.type.startsWith('image/')) {
+                    try {
+                        const dataUrl = await compressImage(file);
+                        if (dataUrl && dataUrl.length <= 750000) {
+                            await updateDoc(doc(db, "expenses", expenseId), { receiptUrl: dataUrl });
+                            fallbackSaved = true;
+                        }
+                    } catch (fallbackErr) {
+                        console.error(fallbackErr);
+                    }
+                }
+                if (fallbackSaved) return;
+
                 const errCode = error && error.code ? ' (' + error.code + ')' : '';
                 Swal.fire({
                     icon: 'error',
@@ -1292,11 +1337,11 @@ document.addEventListener('click', async (e) => {
                     const page1 = makePage(`
                         <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 30px;">
                             <tr>
-                                <td style="text-align: ${isEng ? 'left' : 'right'};">
+                                <td style="text-align: left;">
                                     <h1 style="color: #1e3a8a; margin: 0; font-size: 26px; font-weight: bold;">${titleStr}</h1>
                                     <p style="margin: 6px 0 0 0; font-size: 13px; color: #475569;">${isEng ? 'Driver Expense Tracking System' : 'نظام إدارة مصاريف السائقين'}</p>
                                 </td>
-                                <td style="text-align: ${isEng ? 'right' : 'left'}; vertical-align: bottom;">
+                                <td style="text-align: right; vertical-align: bottom;">
                                     <p style="margin: 0; font-size: 13px; font-weight: bold; color: #000;">${dateStr} ${currentDate}</p>
                                 </td>
                             </tr>
