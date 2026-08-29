@@ -1153,26 +1153,12 @@ document.addEventListener('click', async (e) => {
             };
 
             try {
-                // أولاً: رفع عادي لـ Firebase Storage
-                try {
-                    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
-                    const storage = getStorage();
-                    const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, '_');
-                    const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${safeName}`);
-                    await uploadBytes(fileRef, file);
-                    const downloadURL = await getDownloadURL(fileRef);
-                    await updateDoc(doc(db, "expenses", expenseId), { receiptUrl: downloadURL });
-                    return; // نجاح — الجدول يتحدث تلقائياً وينقلب الزر أخضر
-                } catch (storageErr) {
-                    console.error('Storage upload failed:', storageErr);
-                }
-
-                // ثانياً: حل احتياطي — ضغط الصورة وحفظها داخل الموقع مباشرة
+                // ضغط الصورة وحفظها داخل الموقع مباشرة (سريع وموثوق، لا يعتمد على التخزين السحابي)
                 let dataUrl = null;
                 try {
-                    dataUrl = await compressImage(file, 1000, 0.78);
+                    dataUrl = await compressImage(file, 900, 0.72);
                     if (!dataUrl || dataUrl.length > 850000) {
-                        dataUrl = await compressImage(file, 700, 0.6);
+                        dataUrl = await compressImage(file, 600, 0.55);
                     }
                 } catch (compressErr) {
                     console.error('Compress failed:', compressErr);
@@ -1187,8 +1173,8 @@ document.addEventListener('click', async (e) => {
                 }
 
                 fail(isEng
-                    ? 'Cannot upload this file. Try another image (JPG or PNG).'
-                    : 'تعذر حفظ هذه الفاتورة. جرّب صورة أخرى بصيغة JPG أو PNG.');
+                    ? 'Cannot save this image. Try another image (JPG or PNG).'
+                    : 'تعذر حفظ الصورة. جرّب صورة أصغر أو بصيغة JPG.');
             } catch (err) {
                 console.error(err);
                 fail((isEng ? 'Error: ' : 'خطأ: ')
