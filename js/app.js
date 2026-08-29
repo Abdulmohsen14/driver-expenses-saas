@@ -15,7 +15,7 @@ try {
 // 2. الاستدعاءات والإعدادات الأساسية
 // ==========================================
 import { db } from './firebase-config.js';
-import { collection, query, where, doc, deleteDoc, updateDoc, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { collection, query, where, doc, deleteDoc, updateDoc, addDoc, getDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth, updateEmail, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const auth = getAuth();
@@ -322,6 +322,16 @@ function fetchDashboardDrivers() {
 
 let activeExpenseSort = 'newest';
 let expensesCache = [];
+const MAX_RECEIPTS = 3;
+
+function getReceiptUrls(exp) {
+    if (!exp) return [];
+    const arr = Array.isArray(exp.receiptUrls) ? exp.receiptUrls.filter(u => u && (typeof u !== 'string' || (u !== '-' && u.toLowerCase() !== 'pending'))) : [];
+    if (arr.length > 0) return arr;
+    const legacy = exp.receiptUrl;
+    if (legacy && typeof legacy === 'string' && legacy !== '-' && legacy.toLowerCase() !== 'pending') return [legacy];
+    return [];
+}
 
 function fetchUserExpenses(driverId) {
     if (!driverId) return;
@@ -363,15 +373,26 @@ function renderExpensesTable() {
 
     const rows = list.map((data) => {
         const id = data.id;
-        const hasReceipt = data.receiptUrl && data.receiptUrl !== '-' && data.receiptUrl.toLowerCase() !== 'pending';
+        const receipts = getReceiptUrls(data);
         const isCompleted = data.status && data.status.toLowerCase() === 'completed';
         const statusColor = isCompleted ? '#10b981' : '#eab308';
         const statusText = isEng ? (isCompleted ? "Completed" : "Pending") : (isCompleted ? "مكتملة" : "معلقة");
         const statusBadge = `<span style="color: ${statusColor}">●</span> ${statusText}`;
 
-        const receiptBadge = hasReceipt
-            ? `<button class="btn-text receipt-view-btn" data-path="${encodeURIComponent(receiptPathFromUrl(data.receiptUrl))}" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; cursor: pointer;"><i class="fa-solid fa-check"></i> ${isEng ? 'Receipt' : 'الفاتورة'}</button>`
-            : `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold;"><i class="fa-solid fa-upload"></i> ${isEng ? 'Attach' : 'إرفاق'}</button>`;
+        // أزرار الفواتير: عرض + حذف + إضافة (حتى 3 صور)
+        const greenBtn = (path) => `<button class="btn-text receipt-view-btn" data-path="${encodeURIComponent(receiptPathFromUrl(path))}" style="background-color: rgba(46,204,113,0.1); color: #2ecc71; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; cursor: pointer; margin: 2px;"><i class="fa-solid fa-check"></i> ${isEng ? 'Receipt' : 'الفاتورة'}</button>`;
+        const delBtn = (path) => `<button class="btn-text receipt-del-btn" data-id="${id}" data-path="${encodeURIComponent(receiptPathFromUrl(path))}" style="color: var(--danger); font-size: 11px; background: rgba(231,76,60,0.1); padding: 3px 7px; border-radius: 6px; margin: 2px; cursor: pointer;" title="${isEng ? 'Delete receipt' : 'حذف الفاتورة'}"><i class="fa-solid fa-xmark"></i></button>`;
+        const addBtn = `<button class="btn-text upload-btn" data-id="${id}" style="color: var(--primary-accent); font-weight: bold; margin: 2px;"><i class="fa-solid fa-upload"></i> ${isEng ? 'Attach' : 'إرفاق'}</button>`;
+
+        let receiptBadge;
+        if (receipts.length === 0) {
+            receiptBadge = addBtn;
+        } else {
+            receiptBadge = receipts.map(g => greenBtn(g) + delBtn(g)).join('');
+            if (receipts.length < MAX_RECEIPTS) {
+                receiptBadge += addBtn;
+            }
+        }
 
         return `
             <tr id="exp-row-${id}" style="border-bottom: 1px solid var(--border-color); transition: background 0.2s;">
@@ -397,7 +418,7 @@ function renderExpensesTable() {
 function sortExpenses(arr) {
     const copy = (arr || []).slice();
     const cmpDate = (a, b) => (expenseDateStr(b) || '').localeCompare(expenseDateStr(a) || '');
-    const isReceipt = (x) => x.receiptUrl && x.receiptUrl !== '-' && x.receiptUrl.toLowerCase() !== 'pending';
+    const isReceipt = (x) => getReceiptUrls(x).length > 0;
 
     switch (activeExpenseSort) {
         case 'amount-asc':
@@ -1118,6 +1139,44 @@ document.addEventListener('submit', async (e) => {
 });
 
 document.addEventListener('click', async (e) => {
+    // === زر حذف فاتورة ===
+    const delBtn = e.target.closest('.receipt-del-btn');
+    if (delBtn) {
+        const id = delBtn.getAttribute('data-id');
+        const path = decodeURIComponent(delBtn.getAttribute('data-path') || '');
+        const isEng = document.documentElement.lang === 'en';
+        if (!delBtn.classList.contains('confirming-delete')) {
+            const originalHtml = delBtn.innerHTML;
+            delBtn.innerHTML = isEng ? 'Sure?' : 'متأكد؟';
+            delBtn.style.background = 'var(--danger)';
+            delBtn.style.color = '#fff';
+            delBtn.classList.add('confirming-delete');
+            setTimeout(() => {
+                if (document.body.contains(delBtn)) {
+                    delBtn.innerHTML = originalHtml;
+                    delBtn.style.background = '';
+                    delBtn.style.color = '';
+                    delBtn.classList.remove('confirming-delete');
+                }
+            }, 3000);
+        } else {
+            delBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            try {
+                const snap = await getDoc(doc(db, "expenses", id));
+                const filtered = getReceiptUrls(snap.exists() ? snap.data() : {}).filter(u => receiptPathFromUrl(u) !== path);
+                if (filtered.length === 0) {
+                    await updateDoc(doc(db, "expenses", id), { receiptUrls: [], receiptUrl: '-' });
+                } else {
+                    await updateDoc(doc(db, "expenses", id), { receiptUrls: filtered });
+                }
+            } catch (err) {
+                console.error(err);
+                Swal.fire({ icon: 'error', title: isEng ? 'Error' : 'خطأ', text: isEng ? 'Failed to delete the receipt.' : 'تعذر حذف الفاتورة.' });
+            }
+        }
+        return;
+    }
+
     // === زر عرض الفاتورة ===
     const receiptBtn = e.target.closest('.receipt-view-btn');
     if (receiptBtn) {
@@ -1153,7 +1212,17 @@ document.addEventListener('click', async (e) => {
             };
 
             try {
-                // ضغط الصورة وحفظها داخل الموقع مباشرة (سريع وموثوق، لا يعتمد على التخزين السحابي)
+                // عدد الفواتير الحالية للعملية
+                const currentSnap = await getDoc(doc(db, "expenses", expenseId));
+                const existing = getReceiptUrls(currentSnap.exists() ? currentSnap.data() : {});
+                if (existing.length >= MAX_RECEIPTS) {
+                    uploadBtn.innerHTML = originalHtml;
+                    uploadBtn.style.pointerEvents = 'auto';
+                    Swal.fire({ icon: 'info', title: isEng ? 'Maximum reached' : 'الحد الأقصى 3 فواتير', text: isEng ? 'You can add up to 3 receipts per operation. Delete one first.' : 'يمكن إضافة حتى 3 فواتير للعملية الواحدة. احذف فاتورة أولاً لتضيف غيرها.', timer: 2500, showConfirmButton: false });
+                    return;
+                }
+
+                // ضغط الصورة وحفظها داخل الموقع مباشرة
                 let dataUrl = null;
                 try {
                     dataUrl = await compressImage(file, 900, 0.72);
@@ -1165,11 +1234,10 @@ document.addEventListener('click', async (e) => {
                 }
 
                 if (dataUrl && dataUrl.length <= 850000) {
-                    await updateDoc(doc(db, "expenses", expenseId), { receiptUrl: dataUrl });
+                    await updateDoc(doc(db, "expenses", expenseId), { receiptUrls: existing.concat(dataUrl) });
                     uploadBtn.innerHTML = originalHtml;
                     uploadBtn.style.pointerEvents = 'auto';
-                    Swal.fire({ icon: 'success', title: isEng ? 'Receipt saved' : 'تم حفظ الفاتورة', text: isEng ? 'The receipt was saved inside the app.' : 'تم حفظ الفاتورة داخل الموقع.', timer: 1800, showConfirmButton: false });
-                    return;
+                    return; // الجدول يتحدث تلقائياً ويظهر زر الفاتورة
                 }
 
                 fail(isEng
