@@ -11,8 +11,17 @@
     "public": ".",
     "ignore": [
       "firebase.json",
+      ".firebaserc",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "**/serviceAccountKey*.json",
+      "**/.env",
+      "telegram-bot/**",
+      "functions/**",
+      "dataconnect/**",
+      "src/**",
+      "package.json",
+      "package-lock.json"
     ]
   },
   "functions": [
