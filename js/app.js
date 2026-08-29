@@ -1142,58 +1142,58 @@ document.addEventListener('click', async (e) => {
             const file = event.target.files[0];
             if (!file) return;
 
-            // تغيير شكل الزر إلى تحميل
             const originalHtml = uploadBtn.innerHTML;
             uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             uploadBtn.style.pointerEvents = 'none';
 
-            try {
-                // استدعاء مكتبة Firebase Storage للرفع
-                const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
-                const storage = getStorage();
-                
-                // تحديد مكان حفظ الصورة في فايربيس (تنظيف اسم الملف لتجنب كسر الرابط)
-                const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, '_');
-                const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${safeName}`);
-                
-                // رفع الملف
-                await uploadBytes(fileRef, file);
-                const downloadURL = await getDownloadURL(fileRef);
-
-                // ربط رابط الصورة بالعملية في قاعدة البيانات
-                await updateDoc(doc(db, "expenses", expenseId), {
-                    receiptUrl: downloadURL
-                });
-                
-                // الجدول بيتحدث لحاله ويصير الزر أخضر (الفاتورة)
-            } catch (error) {
-                console.error(error);
-                // محاولة احتياطية: ضغط الصورة وحفظها داخل حسابك مباشرة
-                // (تعمل حتى لو كانت صلاحيات Storage غير مفعلة)
-                let fallbackSaved = false;
-                if (file && file.type && file.type.startsWith('image/')) {
-                    try {
-                        const dataUrl = await compressImage(file);
-                        if (dataUrl && dataUrl.length <= 750000) {
-                            await updateDoc(doc(db, "expenses", expenseId), { receiptUrl: dataUrl });
-                            fallbackSaved = true;
-                        }
-                    } catch (fallbackErr) {
-                        console.error(fallbackErr);
-                    }
-                }
-                if (fallbackSaved) return;
-
-                const errCode = error && error.code ? ' (' + error.code + ')' : '';
-                Swal.fire({
-                    icon: 'error',
-                    title: isEng ? 'Upload failed' : 'فشل الرفع',
-                    text: (isEng
-                        ? 'Could not upload the receipt. Check Firebase Storage rules: open Firebase Console > Storage > Rules and allow "allow read, write: if request.auth != null".'
-                        : 'تعذر رفع الفاتورة. تأكد من تفعيل Storage في فايربيس، ومن أن قواعد Storage تسمح برفع الملفات، ثم أعد المحاولة.') + errCode
-                });
+            const fail = (msg) => {
                 uploadBtn.innerHTML = originalHtml;
                 uploadBtn.style.pointerEvents = 'auto';
+                Swal.fire({ icon: 'error', title: isEng ? 'Upload failed' : 'فشل الرفع', text: msg });
+            };
+
+            try {
+                // أولاً: رفع عادي لـ Firebase Storage
+                try {
+                    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js");
+                    const storage = getStorage();
+                    const safeName = file.name.replace(/[^\w.\-\u0600-\u06FF]+/g, '_');
+                    const fileRef = ref(storage, `receipts/${currentUser.uid}/${Date.now()}_${safeName}`);
+                    await uploadBytes(fileRef, file);
+                    const downloadURL = await getDownloadURL(fileRef);
+                    await updateDoc(doc(db, "expenses", expenseId), { receiptUrl: downloadURL });
+                    return; // نجاح — الجدول يتحدث تلقائياً وينقلب الزر أخضر
+                } catch (storageErr) {
+                    console.error('Storage upload failed:', storageErr);
+                }
+
+                // ثانياً: حل احتياطي — ضغط الصورة وحفظها داخل الموقع مباشرة
+                let dataUrl = null;
+                try {
+                    dataUrl = await compressImage(file, 1000, 0.78);
+                    if (!dataUrl || dataUrl.length > 850000) {
+                        dataUrl = await compressImage(file, 700, 0.6);
+                    }
+                } catch (compressErr) {
+                    console.error('Compress failed:', compressErr);
+                }
+
+                if (dataUrl && dataUrl.length <= 850000) {
+                    await updateDoc(doc(db, "expenses", expenseId), { receiptUrl: dataUrl });
+                    uploadBtn.innerHTML = originalHtml;
+                    uploadBtn.style.pointerEvents = 'auto';
+                    Swal.fire({ icon: 'success', title: isEng ? 'Receipt saved' : 'تم حفظ الفاتورة', text: isEng ? 'The receipt was saved inside the app.' : 'تم حفظ الفاتورة داخل الموقع.', timer: 1800, showConfirmButton: false });
+                    return;
+                }
+
+                fail(isEng
+                    ? 'Cannot upload this file. Try another image (JPG or PNG).'
+                    : 'تعذر حفظ هذه الفاتورة. جرّب صورة أخرى بصيغة JPG أو PNG.');
+            } catch (err) {
+                console.error(err);
+                fail((isEng ? 'Error: ' : 'خطأ: ')
+                    + (err && (err.message || err.code) ? (err.message || err.code) : 'unknown')
+                    + (err && err.code ? ' (' + err.code + ')' : ''));
             }
         };
         
