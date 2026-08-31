@@ -817,11 +817,13 @@ function renderSettingsPage() {
                     <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Email:" : "الإيميل:"}</label>
                     <input type="email" id="settings-email-input" value="${currentEmail}" required autocomplete="off" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
+                <p id="settings-email-error" class="field-error" style="color: var(--danger); margin-left: 135px;"></p>
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Password:" : "الرقم السري:"}</label>
-                    <input type="password" id="settings-password-input" placeholder="********" autocomplete="new-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "New Password:" : "رقم سري جديد:"}</label>
+                    <input type="password" id="settings-password-input" placeholder="${isEng ? 'Leave empty to keep it' : 'اتركه فارغاً إذا لا تريد تغييره'}" autocomplete="new-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
+                <p id="settings-password-error" class="field-error" style="color: var(--danger); margin-left: 135px; white-space: normal;"></p>
 
                 <div style="display: flex; gap: 15px; margin-top: 15px; justify-content: center;">
                     <button type="submit" id="save-settings-btn" class="btn-primary" style="padding: 10px 50px; font-size: 15px; font-weight: 600; transition: 0.2s;">${isEng ? "Save" : "حفظ"}</button>
@@ -1203,14 +1205,31 @@ document.addEventListener('submit', async (e) => {
         e.preventDefault();
         const newName = document.getElementById('settings-name-input').value.trim();
         const newEmail = document.getElementById('settings-email-input').value.trim();
-        const newPassword = document.getElementById('settings-password-input').value; 
-        if (!newName) return;
-        
-        const saveBtn = document.getElementById('save-settings-btn');
+        const newPassword = document.getElementById('settings-password-input').value;
+
+        const emailErrEl = document.getElementById('settings-email-error');
+        const passErrEl = document.getElementById('settings-password-error');
         const isEng = document.documentElement.lang === 'en';
+        const setErr = (el, msg) => { if (el) { el.textContent = msg; el.classList.add('show'); } };
+        const clearAll = () => [emailErrEl, passErrEl].forEach(el => { if (el) { el.textContent = ''; el.classList.remove('show'); } });
+
+        clearAll();
+
+        if (!newName) { return; }
+
+        // شروط كلمة المرور مطبقة على التغيير أيضاً
+        if (newPassword && !/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(newPassword)) {
+            setErr(passErrEl, isEng
+                ? 'Weak password. It must be at least 8 characters and contain both English letters and numbers.'
+                : 'كلمة المرور ضعيفة! يجب أن تكون 8 خانات على الأقل وتحتوي على أحرف إنجليزية وأرقام.');
+            document.getElementById('settings-password-input').classList.add('input-error');
+            return;
+        }
+
+        const saveBtn = document.getElementById('save-settings-btn');
         const originalText = saveBtn.innerHTML;
         saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-        
+
         try {
             if (auth.currentUser) {
                 await updateProfile(auth.currentUser, { displayName: newName });
@@ -1222,17 +1241,22 @@ document.addEventListener('submit', async (e) => {
             document.getElementById('user-name').textContent = newName;
             saveBtn.innerHTML = isEng ? 'Saved ✔' : 'تم الحفظ ✔';
             saveBtn.style.background = '#2ecc71';
-            document.getElementById('settings-password-input').value = ''; 
+            document.getElementById('settings-password-input').value = '';
             setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
         } catch (error) {
-            Swal.fire({
-                icon: 'error', 
-                title: 'Error', 
-                text: error.code === 'auth/requires-recent-login'
-                    ? 'Please log in again to change email or password.'
-                    : error.message
-            });
             saveBtn.innerHTML = originalText;
+            if (error.code === 'auth/email-already-in-use') {
+                setErr(emailErrEl, isEng
+                    ? 'This email is already registered to another account.'
+                    : 'هذا الإيميل مسجل مسبقاً بحساب آخر.');
+                document.getElementById('settings-email-input').classList.add('input-error');
+            } else if (error.code === 'auth/requires-recent-login') {
+                setErr(passErrEl, isEng
+                    ? 'For security, please log out and log in again, then retry changing the email or password.'
+                    : 'للأمان، سجل الخروج ثم ادخل من جديد وعاود المحاولة لتغيير الإيميل أو الرقم السري.');
+            } else {
+                setErr(passErrEl, isEng ? 'Error: ' + (error.message || '') : 'خطأ: ' + (error.message || ''));
+            }
         }
     }
 });

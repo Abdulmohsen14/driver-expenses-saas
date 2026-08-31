@@ -34,6 +34,20 @@ const logoutBtn = document.getElementById('logout-btn');
 const userNameEl = document.getElementById('user-name');
 const userAvatarEl = document.getElementById('user-avatar');
 
+// عناصر رسائل الخطأ المضمّنة (بدل النوافذ المنبثقة)
+const loginErrorEl = document.getElementById('login-error');
+const signupErrorEl = document.getElementById('signup-error');
+const signupPasswordErrorEl = document.getElementById('signup-password-error');
+const signupConfirmErrorEl = document.getElementById('signup-confirm-error');
+
+function isEnglish() { return document.documentElement.lang === 'en'; }
+
+function showError(el, msg) { if (el) { el.textContent = msg; el.classList.add('show'); } }
+function clearErrors() {
+    [loginErrorEl, signupErrorEl, signupPasswordErrorEl, signupConfirmErrorEl].forEach(el => { if (el) { el.textContent = ''; el.classList.remove('show'); } });
+}
+function markInput(input) { if (input) input.classList.add('input-error'); setTimeout(() => { if (input) input.classList.remove('input-error'); }, 2600); }
+
 // 1. الدارك مود
 const savedTheme = localStorage.getItem('app-theme') || 'light';
 document.documentElement.setAttribute('data-theme', savedTheme);
@@ -61,34 +75,46 @@ showLoginBtn.addEventListener('click', () => {
 // 3. قوقل
 googleBtn.addEventListener('click', async () => {
     try { await signInWithPopup(auth, provider); } 
-    catch (error) { alert("فشل الدخول بحساب قوقل."); }
+    catch (error) { /* تعامل عام */ }
 });
 
 // 4. إنشاء حساب جديد (مع شروط الأمان)
 emailSignupBtn.addEventListener('click', async () => {
+    const engl = isEnglish();
     const name = signupName.value.trim();
     const email = signupEmail.value.trim();
     const pass = signupPassword.value;
     const passConfirm = signupPasswordConfirm.value;
 
+    clearErrors();
+
     // التأكد من عدم وجود حقول فارغة
     if (!name || !email || !pass || !passConfirm) {
-        return alert("الرجاء تعبئة جميع الحقول!");
-    }
-
-    // التأكد من تطابق كلمة المرور
-    if (pass !== passConfirm) {
-        return alert("كلمات المرور غير متطابقة، تأكد منها!");
+        showError(signupErrorEl, engl ? 'Please fill in all the fields.' : 'الرجاء تعبئة جميع الحقول.');
+        return;
     }
 
     // فحص قوة كلمة المرور (8 خانات على الأقل، حروف إنجليزية وأرقام)
     const strongRegex = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
     if (!strongRegex.test(pass)) {
-        return alert("كلمة المرور ضعيفة! يجب أن تكون 8 خانات على الأقل وتحتوي على أحرف إنجليزية وأرقام.");
+        showError(signupPasswordErrorEl, engl
+            ? 'Weak password. It must be at least 8 characters and contain both English letters and numbers.'
+            : 'كلمة المرور ضعيفة! يجب أن تكون 8 خانات على الأقل وتحتوي على أحرف إنجليزية وأرقام.');
+        markInput(signupPassword);
+        return;
+    }
+
+    // التأكد من تطابق كلمة المرور (الخانة الثانية مع الأولى)
+    if (pass !== passConfirm) {
+        showError(signupConfirmErrorEl, engl
+            ? 'The two passwords do not match.'
+            : 'كلمتا المرور غير متطابقتين، تأكد منهما.');
+        markInput(signupPasswordConfirm);
+        return;
     }
 
     try {
-        emailSignupBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري الإنشاء...';
+        emailSignupBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + (engl ? 'Creating...' : 'جاري الإنشاء...');
         // إنشاء الحساب في فايربيس
         const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
         
@@ -96,27 +122,43 @@ emailSignupBtn.addEventListener('click', async () => {
         await updateProfile(userCredential.user, { displayName: name });
         
         // إعادة تعيين الزر
-        emailSignupBtn.innerHTML = 'إنشاء الحساب';
+        emailSignupBtn.innerHTML = engl ? 'Create Account' : 'إنشاء الحساب';
     } catch (error) {
-        emailSignupBtn.innerHTML = 'إنشاء الحساب';
-        if(error.code === 'auth/email-already-in-use') alert("هذا الإيميل مسجل مسبقاً!");
-        else alert("خطأ: " + error.message);
+        emailSignupBtn.innerHTML = engl ? 'Create Account' : 'إنشاء الحساب';
+        if (error.code === 'auth/email-already-in-use') {
+            showError(signupErrorEl, engl
+                ? 'This email is already registered. Try logging in or use a different email.'
+                : 'هذا الإيميل مسجل مسبقاً. سجل دخولك أو استخدم إيميلاً آخر.');
+            markInput(signupEmail);
+        } else {
+            showError(signupErrorEl, engl ? 'An error occurred: ' + (error.message || '') : 'حدث خطأ: ' + (error.message || ''));
+        }
     }
 });
 
 // 5. تسجيل الدخول العادي
 emailLoginBtn.addEventListener('click', async () => {
+    const engl = isEnglish();
     const email = loginEmail.value.trim();
     const password = loginPassword.value;
     
-    if (!email || !password) return alert("الرجاء إدخال البريد وكلمة المرور!");
+    clearErrors();
+    
+    if (!email || !password) {
+        showError(loginErrorEl, engl ? 'Please enter your email and password.' : 'الرجاء إدخال البريد الإلكتروني وكلمة المرور.');
+        return;
+    }
     
     try {
-        emailLoginBtn.innerHTML = "جاري الدخول...";
+        emailLoginBtn.innerHTML = engl ? 'Signing in...' : 'جاري الدخول...';
         await signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
-        emailLoginBtn.innerHTML = "دخول";
-        alert("بيانات الدخول غير صحيحة!");
+        emailLoginBtn.innerHTML = engl ? 'Sign In' : 'دخول';
+        showError(loginErrorEl, engl
+            ? 'Wrong email or password. Please try again.'
+            : 'الرقم السري أو اسم المستخدم غلط. يرجى إعادة المحاولة.');
+        markInput(loginEmail);
+        markInput(loginPassword);
     }
 });
 
