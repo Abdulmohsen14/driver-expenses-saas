@@ -16,7 +16,7 @@ try {
 // ==========================================
 import { db } from './firebase-config.js';
 import { collection, query, where, doc, deleteDoc, updateDoc, addDoc, getDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getAuth, updatePassword, updateProfile, verifyBeforeUpdateEmail } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, updatePassword, updateProfile, verifyBeforeUpdateEmail, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const auth = getAuth();
 const contentArea = document.querySelector('.content-area');
@@ -814,6 +814,10 @@ function renderSettingsPage() {
                 </div>
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Current Password:" : "كلمة المرور الحالية:"}</label>
+                    <input type="password" id="settings-current-password-input" placeholder="${isEng ? 'Required to change email or password' : 'مطلوبة لتغيير الإيميل أو الرقم السري'}" autocomplete="current-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
+                </div>
+                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                     <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Email:" : "الإيميل:"}</label>
                     <input type="email" id="settings-email-input" value="${currentEmail}" required autocomplete="off" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
@@ -1206,6 +1210,7 @@ document.addEventListener('submit', async (e) => {
         const newName = document.getElementById('settings-name-input').value.trim();
         const newEmail = document.getElementById('settings-email-input').value.trim();
         const newPassword = document.getElementById('settings-password-input').value;
+        const currentPassword = document.getElementById('settings-current-password-input').value;
 
         const emailErrEl = document.getElementById('settings-email-error');
         const passErrEl = document.getElementById('settings-password-error');
@@ -1217,13 +1222,39 @@ document.addEventListener('submit', async (e) => {
 
         if (!newName) { return; }
 
-        // شروط كلمة المرور مطبقة على التغيير أيضاً
+        // شروط كلمة المرور الجديدة مطبقة على التغيير أيضاً
         if (newPassword && !/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(newPassword)) {
             setErr(passErrEl, isEng
                 ? 'Weak password. It must be at least 8 characters and contain both English letters and numbers.'
                 : 'كلمة المرور ضعيفة! يجب أن تكون 8 خانات على الأقل وتحتوي على أحرف إنجليزية وأرقام.');
             document.getElementById('settings-password-input').classList.add('input-error');
             return;
+        }
+
+        const wantsEmailChange = newEmail && newEmail !== auth.currentUser.email;
+        const wantsPasswordChange = !!newPassword;
+
+        // عند تغيير الإيميل أو الرقم السري، فايربيس يتطلب تحققاً من الهوية.
+        // نطلب كلمة المرور الحالية ونعيد التحقق تلقائياً (بدون تسجيل خروج).
+        if ((wantsEmailChange || wantsPasswordChange) && auth.currentUser && auth.currentUser.email) {
+            if (!currentPassword) {
+                setErr(passErrEl, isEng
+                    ? 'Enter your current password to confirm the change.'
+                    : 'اكتب كلمة المرور الحالية لتأكيد التغيير.');
+                document.getElementById('settings-current-password-input').classList.add('input-error');
+                return;
+            }
+            try {
+                const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+                await reauthenticateWithCredential(auth.currentUser, credential);
+            } catch (reauthErr) {
+                setErr(passErrEl, isEng
+                    ? 'The current password is incorrect. Please try again.'
+                    : 'كلمة المرور الحالية غير صحيحة. حاول مرة أخرى.');
+                document.getElementById('settings-current-password-input').classList.add('input-error');
+                document.getElementById('settings-current-password-input').value = '';
+                return;
+            }
         }
 
         const saveBtn = document.getElementById('save-settings-btn');
@@ -1244,7 +1275,7 @@ document.addEventListener('submit', async (e) => {
                 // نظام فايربيس يمنع تغيير الإيميل مباشرة لأمان (Email Enumeration Protection)
                 // فعند طلب تغيير الإيميل: إن كان مسجلاً مسبقاً تظهر رسالة، وإلا يُرسل بريد تحقق
                 let emailSent = false;
-                if (newEmail && newEmail !== auth.currentUser.email) {
+                if (wantsEmailChange) {
                     await verifyBeforeUpdateEmail(auth.currentUser, newEmail);
                     emailSent = true;
                 }
@@ -1261,6 +1292,7 @@ document.addEventListener('submit', async (e) => {
                     setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
                 }
                 document.getElementById('settings-password-input').value = '';
+                document.getElementById('settings-current-password-input').value = '';
             }
         } catch (error) {
             saveBtn.innerHTML = originalText;
@@ -1269,10 +1301,6 @@ document.addEventListener('submit', async (e) => {
                     ? 'This email is already registered to another account.'
                     : 'هذا الإيميل مسجل مسبقاً بحساب آخر.');
                 document.getElementById('settings-email-input').classList.add('input-error');
-            } else if (error.code === 'auth/requires-recent-login') {
-                setErr(passErrEl, isEng
-                    ? 'For security, please log out and log in again, then retry changing the email or password.'
-                    : 'للأمان، سجل الخروج ثم ادخل من جديد وعاود المحاولة لتغيير الإيميل أو الرقم السري.');
             } else {
                 setErr(passErrEl, isEng ? 'Error: ' + (error.message || '') : 'خطأ: ' + (error.message || ''));
             }
