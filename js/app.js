@@ -16,7 +16,7 @@ try {
 // ==========================================
 import { db } from './firebase-config.js';
 import { collection, query, where, doc, deleteDoc, updateDoc, addDoc, getDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getAuth, updateEmail, updatePassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, updatePassword, updateProfile, verifyBeforeUpdateEmail } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const auth = getAuth();
 const contentArea = document.querySelector('.content-area');
@@ -1232,17 +1232,36 @@ document.addEventListener('submit', async (e) => {
 
         try {
             if (auth.currentUser) {
-                await updateProfile(auth.currentUser, { displayName: newName });
-                if (newEmail && newEmail !== auth.currentUser.email) {
-                    await updateEmail(auth.currentUser, newEmail);
+                // أولاً: تغيير الاسم (إذا تغيّر)
+                if (newName !== (auth.currentUser.displayName || '')) {
+                    await updateProfile(auth.currentUser, { displayName: newName });
                 }
+
+                // ثانياً: تغيير الرقم السري (إذا أُدخل)
                 if (newPassword) await updatePassword(auth.currentUser, newPassword);
+
+                // ثالثاً: تغيير الإيميل (إذا اختلف) — عبر إرسال رسالة تحقق للإيميل الجديد
+                // نظام فايربيس يمنع تغيير الإيميل مباشرة لأمان (Email Enumeration Protection)
+                // فعند طلب تغيير الإيميل: إن كان مسجلاً مسبقاً تظهر رسالة، وإلا يُرسل بريد تحقق
+                let emailSent = false;
+                if (newEmail && newEmail !== auth.currentUser.email) {
+                    await verifyBeforeUpdateEmail(auth.currentUser, newEmail);
+                    emailSent = true;
+                }
+
+                document.getElementById('user-name').textContent = newName;
+                if (emailSent) {
+                    saveBtn.innerHTML = isEng ? 'Check your inbox ✔' : 'تأكد من بريدك ✔';
+                    setErr(emailErrEl, isEng
+                        ? 'A verification email was sent to the new address. Open the link in that email to confirm the change.'
+                        : 'تم إرسال رسالة تحقق إلى الإيميل الجديد. افتح الرابط داخل الرسالة لتأكيد التغيير.');
+                } else {
+                    saveBtn.innerHTML = isEng ? 'Saved ✔' : 'تم الحفظ ✔';
+                    saveBtn.style.background = '#2ecc71';
+                    setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
+                }
+                document.getElementById('settings-password-input').value = '';
             }
-            document.getElementById('user-name').textContent = newName;
-            saveBtn.innerHTML = isEng ? 'Saved ✔' : 'تم الحفظ ✔';
-            saveBtn.style.background = '#2ecc71';
-            document.getElementById('settings-password-input').value = '';
-            setTimeout(() => { saveBtn.innerHTML = originalText; saveBtn.style.background = ''; }, 2000);
         } catch (error) {
             saveBtn.innerHTML = originalText;
             if (error.code === 'auth/email-already-in-use') {
