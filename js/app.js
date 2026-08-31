@@ -815,7 +815,7 @@ function renderSettingsPage() {
                 
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                     <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Current Password:" : "كلمة المرور الحالية:"}</label>
-                    <input type="password" id="settings-current-password-input" placeholder="${isEng ? 'Required to change email or password' : 'مطلوبة لتغيير الإيميل أو الرقم السري'}" autocomplete="current-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
+                    <input type="password" id="settings-current-password-input" placeholder="${isEng ? 'Only needed if the system asks for it' : 'تُطلب فقط إذا طلبها النظام'}" autocomplete="current-password" style="flex: 1; min-width: 250px; padding: 12px 15px; background: var(--bg-base); border: 1px solid rgba(130,130,130,0.3); border-radius: 8px; color: var(--text-primary); outline: none;">
                 </div>
                 <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                     <label style="width: 120px; font-size: 15px; font-weight: 600; color: var(--text-primary);">${isEng ? "Email:" : "الإيميل:"}</label>
@@ -1234,35 +1234,30 @@ document.addEventListener('submit', async (e) => {
         const wantsEmailChange = newEmail && newEmail !== auth.currentUser.email;
         const wantsPasswordChange = !!newPassword;
 
-        // عند تغيير الإيميل أو الرقم السري، فايربيس يتطلب تحققاً من الهوية.
-        // نطلب كلمة المرور الحالية ونعيد التحقق تلقائياً (بدون تسجيل خروج).
-        if ((wantsEmailChange || wantsPasswordChange) && auth.currentUser && auth.currentUser.email) {
-            if (!currentPassword) {
-                setErr(passErrEl, isEng
-                    ? 'Enter your current password to confirm the change.'
-                    : 'اكتب كلمة المرور الحالية لتأكيد التغيير.');
-                document.getElementById('settings-current-password-input').classList.add('input-error');
-                return;
-            }
-            try {
-                const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-                await reauthenticateWithCredential(auth.currentUser, credential);
-            } catch (reauthErr) {
-                setErr(passErrEl, isEng
-                    ? 'The current password is incorrect. Please try again.'
-                    : 'كلمة المرور الحالية غير صحيحة. حاول مرة أخرى.');
-                document.getElementById('settings-current-password-input').classList.add('input-error');
-                document.getElementById('settings-current-password-input').value = '';
-                return;
-            }
-        }
-
+        // إعادة التحقق بكلمة المرور تُطلب فقط إذا فايربيس طالب بها (requires-recent-login).
+        // لو كلمة المرور الحالية مكتوبة من البداية، نستخدمها للتحقق مسبقاً.
         const saveBtn = document.getElementById('save-settings-btn');
         const originalText = saveBtn.innerHTML;
         saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
         try {
             if (auth.currentUser) {
+                // تحقق مسبق إن كانت كلمة المرور الحالية موجودة (اختياري)
+                if (currentPassword && auth.currentUser.email) {
+                    try {
+                        const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+                        await reauthenticateWithCredential(auth.currentUser, credential);
+                    } catch (reauthErr) {
+                        saveBtn.innerHTML = originalText;
+                        setErr(passErrEl, isEng
+                            ? 'The current password is incorrect. Please try again.'
+                            : 'كلمة المرور الحالية غير صحيحة. حاول مرة أخرى.');
+                        document.getElementById('settings-current-password-input').classList.add('input-error');
+                        document.getElementById('settings-current-password-input').value = '';
+                        return;
+                    }
+                }
+
                 // أولاً: تغيير الاسم (إذا تغيّر)
                 if (newName !== (auth.currentUser.displayName || '')) {
                     await updateProfile(auth.currentUser, { displayName: newName });
@@ -1295,6 +1290,22 @@ document.addEventListener('submit', async (e) => {
                 document.getElementById('settings-current-password-input').value = '';
             }
         } catch (error) {
+            // لو فايربيس طلب تحققاً حديثاً ولم يكن لدينا كلمة مرور، نطلبها من المستخدم
+            if (error.code === 'auth/requires-recent-login') {
+                saveBtn.innerHTML = originalText;
+                if (!currentPassword) {
+                    setErr(passErrEl, isEng
+                        ? 'Your session is too old to change this securely. Enter your current password here and try again.'
+                        : 'جلسة الدخول قديمة جداً لتغيير الإيميل بأمان. اكتب كلمة مرورك الحالية هنا ثم أعد المحاولة.');
+                    document.getElementById('settings-current-password-input').classList.add('input-error');
+                } else {
+                    setErr(passErrEl, isEng
+                        ? 'Please enter your current password to confirm the change.'
+                        : 'اكتب كلمة المرور الحالية لتأكيد التغيير.');
+                    document.getElementById('settings-current-password-input').classList.add('input-error');
+                }
+                return;
+            }
             saveBtn.innerHTML = originalText;
             if (error.code === 'auth/email-already-in-use') {
                 setErr(emailErrEl, isEng
